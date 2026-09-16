@@ -103,7 +103,10 @@ export default function SignUpClient({
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   const [canResend, setCanResend] = useState(true);
-  const [legalAccepted, setLegalAccepted] = useState(false);
+  const [termsReadAccepted, setTermsReadAccepted] = useState(false);
+  const [privacyReadAccepted, setPrivacyReadAccepted] = useState(false);
+  const [platformDisclosureAccepted, setPlatformDisclosureAccepted] = useState(false);
+  const legalAccepted = termsReadAccepted && privacyReadAccepted && platformDisclosureAccepted;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -116,8 +119,8 @@ export default function SignUpClient({
       if (!legalAccepted) {
         setError(
           L(
-            "Please accept the Terms & Conditions and Privacy Policy to continue.",
-            "Acepta los Términos y Condiciones y la Política de Privacidad para continuar."
+            "Please complete all required agreements to continue.",
+            "Completa todos los acuerdos requeridos para continuar."
           )
         );
         setLoading(false);
@@ -145,6 +148,9 @@ export default function SignUpClient({
           legalAccepted: true,
           termsVersion: CURRENT_TERMS_VERSION,
           privacyVersion: CURRENT_PRIVACY_VERSION,
+          termsReadAccepted: true,
+          privacyReadAccepted: true,
+          platformDisclosureAccepted: true,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -462,29 +468,60 @@ export default function SignUpClient({
             {passwordError ? <p className="mt-1 text-[10px] text-red-400">{passwordError}</p> : null}
           </div>
 
-          <label className="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-3 text-[10px] leading-relaxed text-slate-300">
-            <input
-              type="checkbox"
-              checked={legalAccepted}
-              onChange={(e) => setLegalAccepted(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
-              required
-            />
-            <span>
-              {L("I accept the ", "Acepto los ")}
-              <Link href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
-                {L("Terms & Conditions", "Términos y Condiciones")}
-              </Link>
-              {L(" and ", " y la ")}
-              <Link href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
-                {L("Privacy Policy", "Política de Privacidad")}
-              </Link>
-              {L(
-                ", and understand NeuroTrader is an educational platform. AI coaching, analytics, simulations, and projections do not provide financial advice or guarantee results.",
-                ", y entiendo que NeuroTrader es una plataforma educativa. El AI coaching, la analítica, simulaciones y proyecciones no proveen asesoría financiera ni garantizan resultados."
-              )}
-            </span>
-          </label>
+          <div className="rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-3 text-[10px] leading-relaxed text-slate-300">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+              {L("Required agreements", "Acuerdos requeridos")}
+            </p>
+            <div className="space-y-2.5">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={termsReadAccepted}
+                  onChange={(e) => setTermsReadAccepted(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L("I have read and accept the current ", "He leído y acepto los ")}
+                  <Link href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                    {L("Terms & Conditions", "Términos y Condiciones")}
+                  </Link>
+                  {L(".", " vigentes.")}
+                </span>
+              </label>
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={privacyReadAccepted}
+                  onChange={(e) => setPrivacyReadAccepted(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L("I have read and accept the current ", "He leído y acepto la ")}
+                  <Link href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                    {L("Privacy Policy", "Política de Privacidad")}
+                  </Link>
+                  {L(".", " vigente.")}
+                </span>
+              </label>
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={platformDisclosureAccepted}
+                  onChange={(e) => setPlatformDisclosureAccepted(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L(
+                    "I understand NeuroTrader is an educational platform. AI coaching, analytics, simulations, reports, and projections do not provide financial advice and do not guarantee results.",
+                    "Entiendo que NeuroTrader es una plataforma educativa. El AI coaching, la analítica, simulaciones, reportes y proyecciones no proveen asesoría financiera ni garantizan resultados."
+                  )}
+                </span>
+              </label>
+            </div>
+          </div>
 
           {error ? <p className="text-[10px] text-red-400">{error}</p> : null}
 

@@ -1,7 +1,11 @@
-import { NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
+
+import { after, NextResponse } from "next/server";
 
 import { getAuthUser } from "@/lib/authServer";
-import { indexNeuroFiling, MAX_NEURO_FILING_BYTES } from "@/lib/neuroFilingLibrary";
+import { MAX_NEURO_FILING_BYTES } from "@/lib/neuroFilingLibrary";
+import { enqueueNeuroJob } from "@/lib/neuroAnalysisJobs";
+import { processNeuroJobBatch } from "@/lib/neuroAnalysisJobWorker";
 import { checkNeuroQuota, checkNeuroStorageQuota } from "@/lib/neuroAnalysisQuota";
 import {
   downloadSecCompanyDocument,
@@ -12,8 +16,10 @@ import {
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { requireRuntimeControl } from "@/lib/runtimeControls";
 
 export const runtime = "nodejs";
+const STAGING_BUCKET = "neuro-analysis-staging";
 
 function filingResponse(row: any, alreadyImported: boolean) {
   return {
@@ -43,6 +49,8 @@ export async function POST(req: Request) {
     if (!authUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const smartToolsGate = await requireSmartToolsOwner(authUser);
     if (smartToolsGate) return smartToolsGate;
+    const runtimeGate = await requireRuntimeControl("pdf_uploads");
+    if (runtimeGate) return runtimeGate;
 
     const rate = await rateLimit(`neuro-analysis:filing-import:${authUser.userId}`, {
       limit: 8,
@@ -99,28 +107,65 @@ export async function POST(req: Request) {
 
     const fiscalYear = document.periodEnd ? Number(document.periodEnd.slice(0, 4)) : null;
     const period = document.form === "10-K" ? (fiscalYear ? `FY ${fiscalYear}` : "Annual") : document.periodEnd ? `Quarter ended ${document.periodEnd}` : "Quarterly";
-    const indexed = await indexNeuroFiling({
-      userId: authUser.userId,
-      ticker: document.ticker,
-      form: document.form,
-      fiscalYear: Number.isInteger(fiscalYear) ? fiscalYear : null,
-      period,
-      periodEnd: document.periodEnd,
-      fileName: downloaded.fileName,
-      content: downloaded.buffer,
+    const extension = downloaded.contentType === "application/pdf" ? "pdf" : "html";
+    const stagedPath = `${authUser.userId}/${Date.now()}-${randomUUID()}.${extension}`;
+    const upload = await supabaseAdmin.storage.from(STAGING_BUCKET).upload(stagedPath, downloaded.buffer, {
       contentType: downloaded.contentType,
-      source: "official_filing_import",
-      metadata: {
-        upload_source: "official_company_document_import",
-        original_type: downloaded.contentType,
-        sec_accession_number: document.accessionNumber,
-        filing_date: document.filingDate,
-        source_url: document.documentUrl,
-        filing_detail_url: document.filingDetailUrl,
-      },
+      upsert: false,
+    });
+    if (upload.error) throw new Error(upload.error.message);
+
+    let job: any;
+    try {
+      job = await enqueueNeuroJob({
+        userId: authUser.userId,
+        jobType: "filing_upload_index",
+        dedupeKey: `sec:${authUser.userId}:${document.accessionNumber}`,
+        payload: {
+          storagePath: stagedPath,
+          ticker: document.ticker,
+          form: document.form,
+          fiscalYear: Number.isInteger(fiscalYear) ? fiscalYear : null,
+          period,
+          periodEnd: document.periodEnd,
+          fileName: downloaded.fileName,
+          contentType: downloaded.contentType,
+          source: "official_filing_import",
+          metadata: {
+            upload_source: "official_company_document_import",
+            original_type: downloaded.contentType,
+            sec_accession_number: document.accessionNumber,
+            filing_date: document.filingDate,
+            source_url: document.documentUrl,
+            filing_detail_url: document.filingDetailUrl,
+          },
+        },
+      });
+    } catch (error) {
+      await supabaseAdmin.storage.from(STAGING_BUCKET).remove([stagedPath]);
+      throw error;
+    }
+
+    after(async () => {
+      await processNeuroJobBatch(1).catch((error) => {
+        console.error("[neuro-analysis/import-filing] background worker error:", error);
+      });
     });
 
-    return NextResponse.json(filingResponse(indexed, false));
+    return NextResponse.json(
+      {
+        queued: true,
+        alreadyImported: false,
+        job: { id: job?.id, status: job?.status ?? "queued" },
+        ticker: document.ticker,
+        form: document.form,
+        fiscalYear: Number.isInteger(fiscalYear) ? fiscalYear : null,
+        period,
+        periodEnd: document.periodEnd,
+        fileName: downloaded.fileName,
+      },
+      { status: 202 }
+    );
   } catch (error: any) {
     console.error("[neuro-analysis/import-filing] error:", error);
     const message = String(error?.message || "Company document import failed.");

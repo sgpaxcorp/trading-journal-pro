@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getAuthUser } from "@/lib/authServer";
+import { requireBrokerConnectivityAccess } from "@/lib/emergencyPortfolioControls";
 import {
   formatSnaptradeError,
   snaptradeGetBalances,
@@ -23,6 +24,8 @@ export async function GET(req: Request) {
 
     const smartToolsGate = await requireSmartToolsOwner(authUser);
     if (smartToolsGate) return smartToolsGate;
+    const emergencyBrokerGate = await requireBrokerConnectivityAccess();
+    if (emergencyBrokerGate) return emergencyBrokerGate;
 
     if (!areBrokerConnectionsEnabledFromEnv()) {
       return brokerConnectionsDisabledResponse();

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { resolveStripeBillingIdentity } from "@/lib/stripeBillingIdentity";
 
 export const runtime = "nodejs";
 
@@ -103,52 +104,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("stripe_subscription_id, stripe_customer_id, plan, subscription_status")
-      .eq("id", user.id)
-      .maybeSingle();
-
+    const billingIdentity = await resolveStripeBillingIdentity(
+      stripe,
+      user,
+      { includeSubscription: true }
+    );
+    const subscriptionId = billingIdentity.subscriptionId ?? "";
+    const customerId = billingIdentity.customerId ?? "";
     const access = {
-      plan: String(profile?.plan ?? ""),
-      status: String(profile?.subscription_status ?? ""),
+      plan: billingIdentity.plan ?? "",
+      status: billingIdentity.entitlementStatus ?? "",
     };
-
-    let subscriptionId = profile?.stripe_subscription_id
-      ? String(profile.stripe_subscription_id)
-      : "";
-    let customerId = profile?.stripe_customer_id ? String(profile.stripe_customer_id) : "";
-
-    if (!customerId && user.email) {
-      const existing = await stripe.customers.list({ email: user.email, limit: 1 });
-      if (existing.data.length > 0) {
-        customerId = existing.data[0].id;
-        await supabaseAdmin
-          .from("profiles")
-          .update({ stripe_customer_id: customerId })
-          .eq("id", user.id);
-      }
-    }
-
-    if (!subscriptionId && customerId) {
-      const list = await stripe.subscriptions.list({
-        customer: customerId,
-        status: "all",
-        limit: 5,
-      });
-      const candidates = (list.data ?? []).sort((a, b) => (b.created || 0) - (a.created || 0));
-      const active = candidates.find((s) =>
-        ["active", "trialing", "past_due", "unpaid", "incomplete"].includes(s.status)
-      );
-      const picked = active || candidates[0];
-      if (picked) {
-        subscriptionId = picked.id;
-        await supabaseAdmin
-          .from("profiles")
-          .update({ stripe_subscription_id: subscriptionId })
-          .eq("id", user.id);
-      }
-    }
 
     let creditBalance = 0;
     if (customerId) {

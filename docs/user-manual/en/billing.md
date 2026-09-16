@@ -14,6 +14,15 @@ Billing is managed in the web app. The mobile app does not create accounts, chan
 6. Schedule subscription cancellation.
 7. Open billing history.
 
+## First subscription agreements
+Before the first secure checkout, the user must confirm three required agreements:
+
+1. They have read and accept the current `Terms & Conditions`.
+2. They have read and accept the current `Privacy Policy`.
+3. They understand the trial, automatic renewal, prepaid no-refund policy, educational-only use, and no-guaranteed-results disclosure.
+
+The checkout button remains disabled until all required agreements are selected. The backend also validates the current versions before creating a Stripe checkout session, so skipping the UI cannot bypass the agreement requirement.
+
 ## Option Flow status
 `Option Flows Analysis` is currently in private beta. It is not available for purchase or direct activation from Billing.
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   ArrowDown,
   ArrowRight,
+  BookOpenCheck,
   BrainCircuit,
   Compass,
   FileText,
@@ -25,6 +26,7 @@ import {
   planPriceLabel,
 } from "@/lib/planCatalog";
 import { WAITLIST_CAMPAIGN } from "@/lib/waitlistCampaign";
+import { TRADING_BUSINESS_CASE_STUDIES } from "@/lib/caseStudies";
 
 type ProductPreviewKind = "dashboard" | "growth" | "coach";
 
@@ -375,6 +377,9 @@ export default function Home() {
           </Link>
 
           <nav className="flex flex-wrap items-center gap-2 text-xs text-slate-300 md:justify-end">
+            <Link href="/case-studies" className="rounded-md px-3 py-2 text-white/82 hover:bg-white/10 hover:text-white">
+              {L("Case Studies", "Case Studies")}
+            </Link>
             <Link href="/signin" className="rounded-md px-3 py-2 text-white/82 hover:bg-white/10 hover:text-white">
               {L("Sign in", "Ingresar")}
             </Link>
@@ -854,6 +859,58 @@ export default function Home() {
                 <p className="mt-2 text-sm leading-6 text-slate-300">{item.detail}</p>
               </article>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-y border-white/10 bg-[#07111d] px-4 py-16 md:px-8">
+        <div className="mx-auto w-full max-w-7xl">
+          <div className="grid gap-7 lg:grid-cols-[0.72fr_1.28fr] lg:items-start">
+            <div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-md border border-emerald-300/30 bg-emerald-400/10 text-emerald-200">
+                <BookOpenCheck className="h-5 w-5" />
+              </div>
+              <p className="mt-5 text-sm font-semibold text-emerald-300">
+                {L("Independent evidence", "Evidencia independiente")}
+              </p>
+              <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">
+                {L("Why trading needs an operating system.", "Por que el trading necesita un sistema operativo.")}
+              </h2>
+              <p className="mt-4 text-sm leading-6 text-slate-300 md:text-base">
+                {L(
+                  "Our public research library connects regulatory guidance and financial reporting to practical operating disciplines: cost control, documented research, measurable risk limits, and recurring review.",
+                  "Nuestra biblioteca publica conecta guias regulatorias y periodismo financiero con disciplinas operativas: control de costos, research documentado, limites medibles y revision recurrente."
+                )}
+              </p>
+              <Link href="/case-studies" className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-emerald-300 hover:text-emerald-200">
+                {L("Read all cited Case Studies", "Leer todos los Case Studies citados")}
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+
+            <div className="divide-y divide-white/10 border-y border-white/10">
+              {TRADING_BUSINESS_CASE_STUDIES.slice(0, 3).map((study) => (
+                <Link
+                  key={study.slug}
+                  href={`/case-studies#${study.slug}`}
+                  className="group grid gap-3 py-5 md:grid-cols-[160px_1fr_auto] md:items-center"
+                >
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-300">{study.publisher}</p>
+                    <p className="mt-1 text-xs text-slate-500">{study.published}</p>
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-white group-hover:text-emerald-200">
+                      {isEs ? study.title.es : study.title.en}
+                    </h3>
+                    <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-400">
+                      {isEs ? study.operatingLesson.es : study.operatingLesson.en}
+                    </p>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-slate-500 group-hover:text-emerald-300" />
+                </Link>
+              ))}
+            </div>
           </div>
         </div>
       </section>

@@ -2,8 +2,14 @@ import { NextResponse } from "next/server";
 
 import { getAuthUser } from "@/lib/authServer";
 import { fetchNeuroMarketData, mapWithConcurrency, sanitizeNeuroTicker, type NeuroMarketData } from "@/lib/neuroMarketData";
+import { financialNumberOrNull } from "@/lib/neuroFinancialDataIntegrity";
 import { checkNeuroQuota, recordNeuroUsage } from "@/lib/neuroAnalysisQuota";
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import {
+  DEFAULT_SCREENING_TEMPLATES,
+  runDeterministicScreen,
+  type ScreeningStrategy,
+} from "@/lib/neuroScreeningEngine";
 import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 
 export const runtime = "nodejs";
@@ -82,8 +88,7 @@ function parseTickers(value: string | null) {
 }
 
 function numberOrNull(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  return financialNumberOrNull(value);
 }
 
 function latestFundamentals(item: NeuroMarketData) {
@@ -106,20 +111,6 @@ function growthFromRows(rows: NeuroMarketData["annualFundamentals"], key: "total
   return cagr(numberOrNull(first[key]), numberOrNull(last[key]), Math.max(1, Number(last.year) - Number(first.year)));
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function scoreLowerBetter(value: number | null, best: number, worst: number) {
-  if (value == null || value <= 0) return 35;
-  return clamp(((worst - value) / (worst - best)) * 100, 0, 100);
-}
-
-function scoreHigherBetter(value: number | null, best: number, worst: number) {
-  if (value == null) return 35;
-  return clamp(((value - worst) / (best - worst)) * 100, 0, 100);
-}
-
 function median(values: Array<number | null | undefined>) {
   const clean = values.map(Number).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
   if (!clean.length) return null;
@@ -127,16 +118,10 @@ function median(values: Array<number | null | undefined>) {
   return clean.length % 2 ? clean[mid] : (clean[mid - 1] + clean[mid]) / 2;
 }
 
-function percentileRank(value: number | null, values: Array<number | null>, higherBetter = true) {
-  const clean = values.filter((item): item is number => item != null && Number.isFinite(item)).sort((a, b) => a - b);
-  if (value == null || !clean.length) return 35;
-  const lower = clean.filter((item) => item <= value).length;
-  const pct = (lower / clean.length) * 100;
-  return higherBetter ? pct : 100 - pct;
-}
-
 function analyzeCompany(item: NeuroMarketData) {
   const latest = latestFundamentals(item);
+  const annual = [...(item.annualFundamentals ?? [])].sort((a, b) => Number(a.year) - Number(b.year));
+  const previous = annual.at(-2) ?? null;
   const marketCap = numberOrNull(item.market.marketCap);
   const freeCashFlow = numberOrNull(latest?.freeCashFlow);
   const netIncome = numberOrNull(latest?.netIncome);
@@ -144,33 +129,16 @@ function analyzeCompany(item: NeuroMarketData) {
   const earningsYield = marketCap && netIncome != null ? netIncome / marketCap : null;
   const revenueCagr = growthFromRows(item.annualFundamentals, "totalRevenue");
   const fcfCagr = growthFromRows(item.annualFundamentals, "freeCashFlow");
-  const fiveYearReturn = item.yearlyPrice?.length
-    ? (() => {
-        const rows = [...item.yearlyPrice].sort((a, b) => a.year - b.year);
-        const first = rows[0];
-        const last = rows.at(-1);
-        return first?.firstClose && last?.lastClose ? last.lastClose / first.firstClose - 1 : null;
-      })()
+  const latestRevenue = numberOrNull(latest?.totalRevenue);
+  const previousRevenue = numberOrNull(previous?.totalRevenue);
+  const revenueGrowth = latestRevenue != null && previousRevenue != null && previousRevenue !== 0
+    ? (latestRevenue - previousRevenue) / Math.abs(previousRevenue)
     : null;
-
-  const valueScore = Math.round(
-    scoreHigherBetter(fcfYield, 0.08, -0.02) * 0.35 +
-      scoreHigherBetter(earningsYield, 0.08, -0.02) * 0.2 +
-      scoreLowerBetter(numberOrNull(item.market.forwardPE ?? item.market.trailingPE), 12, 45) * 0.25 +
-      scoreLowerBetter(numberOrNull(item.market.priceToBook), 1.5, 12) * 0.2
-  );
-  const qualityScore = Math.round(
-    scoreHigherBetter(numberOrNull(latest?.fcfMargin), 0.28, -0.05) * 0.35 +
-      scoreHigherBetter(numberOrNull(latest?.operatingMargin), 0.3, -0.05) * 0.25 +
-      scoreHigherBetter(revenueCagr, 0.15, -0.08) * 0.2 +
-      scoreLowerBetter(numberOrNull(latest?.debtToEquity), 0.2, 3) * 0.2
-  );
-  const dividendScore = Math.round(
-    scoreHigherBetter(numberOrNull(item.market.dividendYield), 0.05, 0) * 0.45 +
-      scoreHigherBetter(fcfYield, 0.08, -0.02) * 0.35 +
-      scoreLowerBetter(numberOrNull(latest?.debtToEquity), 0.2, 3) * 0.2
-  );
-  const momentumScore = Math.round(scoreHigherBetter(fiveYearReturn, 2, -0.5));
+  const currentShares = numberOrNull(latest?.dilutedAverageShares);
+  const previousShares = numberOrNull(previous?.dilutedAverageShares);
+  const shareDilution = currentShares != null && previousShares != null && previousShares !== 0
+    ? (currentShares - previousShares) / Math.abs(previousShares)
+    : null;
 
   return {
     ticker: item.ticker,
@@ -190,48 +158,18 @@ function analyzeCompany(item: NeuroMarketData) {
     operatingMargin: numberOrNull(latest?.operatingMargin),
     fcfMargin: numberOrNull(latest?.fcfMargin),
     debtToEquity: numberOrNull(latest?.debtToEquity),
-    fiveYearReturn,
-    valueScore,
-    qualityScore,
-    dividendScore,
-    momentumScore,
-    potentialScore: 0,
-    verdict: "review",
+    freeCashFlow,
+    revenueGrowth,
+    shareDilution,
     dataWarnings: Object.entries(item.errors ?? {})
       .filter(([, error]) => Boolean(error))
       .map(([key]) => key),
   };
 }
 
-function withRelativePotential(rows: ReturnType<typeof analyzeCompany>[]) {
-  const fcfYields = rows.map((row) => row.fcfYield);
-  const peValues = rows.map((row) => row.forwardPE ?? row.trailingPE);
-  const qualityScores = rows.map((row) => row.qualityScore);
-  const growthValues = rows.map((row) => row.revenueCagr);
-
-  return rows.map((row) => {
-    const relativeValue =
-      percentileRank(row.fcfYield, fcfYields, true) * 0.4 +
-      percentileRank(row.forwardPE ?? row.trailingPE, peValues, false) * 0.25 +
-      percentileRank(row.qualityScore, qualityScores, true) * 0.25 +
-      percentileRank(row.revenueCagr, growthValues, true) * 0.1;
-    const potentialScore = Math.round(
-      row.valueScore * 0.35 +
-        row.qualityScore * 0.3 +
-        row.dividendScore * 0.15 +
-        row.momentumScore * 0.1 +
-        relativeValue * 0.1
-    );
-    const verdict =
-      potentialScore >= 78 && row.qualityScore >= 60
-        ? "high_potential_review"
-        : potentialScore >= 65
-        ? "watchlist"
-        : potentialScore >= 50
-        ? "fair_value_monitor"
-        : "low_priority";
-    return { ...row, potentialScore, verdict };
-  });
+function cleanStrategy(value: string | null): Exclude<ScreeningStrategy, "custom"> {
+  const strategy = String(value ?? "value_candidate") as Exclude<ScreeningStrategy, "custom">;
+  return strategy in DEFAULT_SCREENING_TEMPLATES ? strategy : "value_candidate";
 }
 
 export async function GET(req: Request) {
@@ -264,6 +202,7 @@ export async function GET(req: Request) {
 
     const url = new URL(req.url);
     const sector = cleanSector(url.searchParams.get("sector"));
+    const strategy = cleanStrategy(url.searchParams.get("strategy"));
     const customTickers = parseTickers(url.searchParams.get("tickers"));
     const universe = SECTOR_UNIVERSES[sector];
     const tickers = (customTickers.length ? customTickers : universe.tickers).slice(0, 25);
@@ -285,9 +224,32 @@ export async function GET(req: Request) {
       }
     });
 
-    const rows = withRelativePotential(marketData.map(analyzeCompany)).sort(
-      (a, b) => b.potentialScore - a.potentialScore
-    );
+    const analyzed = marketData.map(analyzeCompany);
+    const screening = runDeterministicScreen({
+      template: DEFAULT_SCREENING_TEMPLATES[strategy],
+      companies: analyzed.map((row) => ({
+        ticker: row.ticker,
+        companyName: row.name,
+        metrics: {
+          market_capitalization: row.marketCap,
+          free_cash_flow: row.freeCashFlow,
+          fcf_yield: row.fcfYield,
+          earnings_yield: row.earningsYield,
+          revenue_growth: row.revenueGrowth,
+          revenue_cagr: row.revenueCagr,
+          fcf_growth: row.fcfCagr,
+          operating_margin: row.operatingMargin,
+          fcf_margin: row.fcfMargin,
+          debt_to_equity: row.debtToEquity,
+          share_dilution: row.shareDilution,
+          trailing_pe: row.trailingPE,
+          forward_pe: row.forwardPE,
+          price_to_book: row.priceToBook,
+        },
+      })),
+    });
+    const analyzedByTicker = new Map(analyzed.map((row) => [row.ticker, row]));
+    const rows = screening.results.map((result) => ({ ...analyzedByTicker.get(result.ticker)!, ...result }));
     const summary = {
       market: "US",
       sector,
@@ -299,9 +261,9 @@ export async function GET(req: Request) {
       medianFcfYield: median(rows.map((row) => row.fcfYield)),
       medianDividendYield: median(rows.map((row) => row.dividendYield)),
       medianRevenueCagr: median(rows.map((row) => row.revenueCagr)),
-      medianQualityScore: median(rows.map((row) => row.qualityScore)),
-      medianValueScore: median(rows.map((row) => row.valueScore)),
-      highPotentialCount: rows.filter((row) => row.verdict === "high_potential_review").length,
+      passedAllRequiredCriteria: rows.filter((row) => row.status === "PASSED_ALL_REQUIRED_CRITERIA").length,
+      failedRequiredCriteria: rows.filter((row) => row.status === "FAILED_REQUIRED_CRITERIA").length,
+      insufficientData: rows.filter((row) => row.status === "INSUFFICIENT_DATA").length,
     };
 
     await recordNeuroUsage({
@@ -314,7 +276,12 @@ export async function GET(req: Request) {
     return NextResponse.json({
       source: "Market Data",
       methodology:
-        "Ranks each company on value, quality, dividend support, momentum, and relative sector potential. This is screening support, not an investment recommendation.",
+        "Applies explicit deterministic criteria and reports PASS, FAIL, or DATA NOT AVAILABLE for each criterion. It does not create an investment score or recommendation.",
+      noMagicScore: true,
+      noLlmUsed: true,
+      strategy,
+      template: screening.template,
+      templates: Object.values(DEFAULT_SCREENING_TEMPLATES).map((template) => ({ key: template.key, name: template.name })),
       market: "US",
       sector,
       sectorLabel: universe.label,

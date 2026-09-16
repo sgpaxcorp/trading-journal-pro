@@ -62,7 +62,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.notebook": "Business Notebook",
     "nav.backStudy": "Strategy Review Lab",
     "nav.rules": "Business Protection System",
-    "nav.forum": "Forum",
     "nav.optionFlow": "Smart Tools",
     "nav.smartTools": "Smart Tools",
 
@@ -71,7 +70,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.notebook.title": "Business Notebook",
     "nav.backStudy.title": "Strategy Review Lab",
     "nav.rules.title": "Business Protection System",
-    "nav.forum.title": "Forum",
     "nav.optionFlow.title": "Smart Tools",
     "nav.smartTools.title": "Smart Tools",
 
@@ -121,15 +119,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.rules.reminders.desc": "Quiet check-ins for premarket, execution records, and business process habits.",
     "nav.rules.alarms.title": "Critical Alarms",
     "nav.rules.alarms.desc": "Popups for max loss, daily goal, open positions, and broken rules.",
-
-    /* -----------------
-       Forum dropdown
-    ------------------ */
-    "nav.forum.community.title": "Community feed",
-    "nav.forum.community.desc": "Share progress with other Trader Entrepreneurs.",
-    // Older alias
-    "nav.forum.communityFeed.title": "Community feed",
-    "nav.forum.communityFeed.desc": "Share progress with other Trader Entrepreneurs.",
 
     /* -----------------
        Help menu (canonical)
@@ -321,7 +310,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.notebook": "Notebook Empresarial",
     "nav.backStudy": "Laboratorio de Revisión",
     "nav.rules": "Sistema de Protección Empresarial",
-    "nav.forum": "Foro",
     "nav.optionFlow": "Smart Tools",
     "nav.smartTools": "Smart Tools",
 
@@ -330,7 +318,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.notebook.title": "Notebook Empresarial",
     "nav.backStudy.title": "Laboratorio de Revisión",
     "nav.rules.title": "Sistema de Protección Empresarial",
-    "nav.forum.title": "Foro",
     "nav.optionFlow.title": "Smart Tools",
     "nav.smartTools.title": "Smart Tools",
 
@@ -379,14 +366,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.rules.reminders.desc": "Checks suaves para premarket, registro de ejecución y hábitos del proceso empresarial.",
     "nav.rules.alarms.title": "Alarmas críticas",
     "nav.rules.alarms.desc": "Popups para max loss, meta diaria, posiciones abiertas y reglas rotas.",
-
-    /* -----------------
-       Forum dropdown
-    ------------------ */
-    "nav.forum.community.title": "Comunidad",
-    "nav.forum.community.desc": "Comparte tu progreso con otros Empresarios Traders.",
-    "nav.forum.communityFeed.title": "Comunidad",
-    "nav.forum.communityFeed.desc": "Comparte tu progreso con otros Empresarios Traders.",
 
     /* -----------------
        Help menu

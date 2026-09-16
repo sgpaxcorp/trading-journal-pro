@@ -92,6 +92,7 @@ export default function Footer() {
               <Link href="/signin" className={linkClass}>{t("footer.links.login", lang)}</Link>
               <Link href="/pricing" className={linkClass}>{t("footer.links.pricing", lang)}</Link>
               <Link href="/blog" className={linkClass}>{t("footer.links.blog", lang)}</Link>
+              <Link href="/case-studies" className={linkClass}>{lang === "es" ? "Case Studies" : "Case Studies"}</Link>
               <Link href={staffHref} className={linkClass}>{t("footer.links.staff", lang)}</Link>
               <Link href={neuroAnalysisHref} className={linkClass}>{t("footer.links.neuroAnalysisLogin", lang)}</Link>
               <Link href={optionFlowHref} className={linkClass}>{t("footer.links.optionFlowLogin", lang)}</Link>

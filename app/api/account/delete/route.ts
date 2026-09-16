@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import { resolveStripeBillingIdentity } from "@/lib/stripeBillingIdentity";
 
 export const runtime = "nodejs";
 
@@ -155,24 +156,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Account email confirmation does not match." }, { status: 400 });
     }
 
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("stripe_subscription_id, stripe_customer_id")
-      .eq("id", userId)
-      .maybeSingle();
-
     const subIds = new Set<string>();
-    const directSubId = profile?.stripe_subscription_id
-      ? String(profile.stripe_subscription_id)
-      : null;
-    if (directSubId) subIds.add(directSubId);
-
-    const customerId = profile?.stripe_customer_id
-      ? String(profile.stripe_customer_id)
-      : null;
-
     const stripe = getStripeClient();
-    if ((directSubId || customerId) && !stripe) {
+    let directSubId: string | null = null;
+    let customerId: string | null = null;
+    if (stripe) {
+      const billingIdentity = await resolveStripeBillingIdentity(
+        stripe,
+        authData.user,
+        { includeSubscription: true }
+      );
+      directSubId = billingIdentity.subscriptionId;
+      customerId = billingIdentity.customerId;
+      if (directSubId) subIds.add(directSubId);
+    }
+
+    const { count: billingIdentityCount } = await supabaseAdmin
+      .from("user_entitlements")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .or("stripe_customer_id.not.is.null,stripe_subscription_id.not.is.null");
+    if (!stripe && Number(billingIdentityCount ?? 0) > 0) {
       return NextResponse.json(
         { error: "Billing cancellation is temporarily unavailable. The account was not deleted." },
         { status: 503 }
@@ -201,6 +205,7 @@ export async function POST(req: NextRequest) {
       removeStoragePrefix("avatars", userId).catch(() => 0),
       removeStoragePrefix("support_attachments", userId).catch(() => 0),
       removeStoragePrefix("notebook-assets", userId).catch(() => 0),
+      removeStoragePrefix("neuro-analysis-staging", userId).catch(() => 0),
       removeStoragePrefix("option_flow_reports", userId).catch(() => 0),
       removeStoragePrefix("option_flow_reports", `outcomes/${userId}`).catch(() => 0),
     ]);

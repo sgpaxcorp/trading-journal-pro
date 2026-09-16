@@ -8,6 +8,7 @@ import type { PlanId } from "@/lib/types";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import {
+  CHECKOUT_DISCLOSURE_VERSION,
   CURRENT_PRIVACY_VERSION,
   CURRENT_TERMS_VERSION,
   FREE_TRIAL_DAYS,
@@ -26,7 +27,11 @@ export default function PlansPage() {
   const [selectedPlan, setSelectedPlan] = useState<PlanId>("advanced");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [checkoutLegalAccepted, setCheckoutLegalAccepted] = useState(false);
+  const [checkoutTermsAccepted, setCheckoutTermsAccepted] = useState(false);
+  const [checkoutPrivacyAccepted, setCheckoutPrivacyAccepted] = useState(false);
+  const [checkoutDisclosureAccepted, setCheckoutDisclosureAccepted] = useState(false);
+  const checkoutLegalAccepted =
+    checkoutTermsAccepted && checkoutPrivacyAccepted && checkoutDisclosureAccepted;
 
   // Si no está logueado, mandarlo a login
   useEffect(() => {
@@ -73,6 +78,10 @@ export default function PlansPage() {
           legalAccepted: true,
           termsVersion: CURRENT_TERMS_VERSION,
           privacyVersion: CURRENT_PRIVACY_VERSION,
+          termsReadAccepted: true,
+          privacyReadAccepted: true,
+          checkoutDisclosureAccepted: true,
+          disclosureVersion: CHECKOUT_DISCLOSURE_VERSION,
         }),
       });
 
@@ -177,28 +186,60 @@ export default function PlansPage() {
           <p className="text-[10px] text-red-400 mb-2">{error}</p>
         )}
 
-        <label className="mb-4 flex items-start gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-3 text-[10px] leading-relaxed text-amber-100/90">
-          <input
-            type="checkbox"
-            checked={checkoutLegalAccepted}
-            onChange={(event) => setCheckoutLegalAccepted(event.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-amber-300 bg-slate-950 text-emerald-400 accent-emerald-400"
-            required
-          />
-          <span>
-            {L(
-              `I accept the current Terms & Conditions and Privacy Policy. I understand the ${FREE_TRIAL_DAYS}-day trial, automatic renewal, prepaid no-refund policy, educational-only use, and no-guaranteed-results disclosure.`,
-              `Acepto los Términos y Condiciones y la Política de Privacidad vigentes. Entiendo el trial de ${FREE_TRIAL_DAYS} días, la renovación automática, la política prepago sin reembolso, el uso educativo y la divulgación de resultados no garantizados.`
-            )}{" "}
-            <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
-              {L("Terms", "Términos")}
-            </a>
-            {" / "}
-            <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
-              {L("Privacy", "Privacidad")}
-            </a>
-          </span>
-        </label>
+        <div className="mb-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-3 text-[10px] leading-relaxed text-amber-100/90">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-100">
+            {L("Required subscription agreements", "Acuerdos requeridos de suscripción")}
+          </p>
+          <div className="space-y-2.5">
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={checkoutTermsAccepted}
+                onChange={(event) => setCheckoutTermsAccepted(event.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-amber-300 bg-slate-950 text-emerald-400 accent-emerald-400"
+                required
+              />
+              <span>
+                {L("I have read and accept the current ", "He leído y acepto los ")}
+                <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                  {L("Terms & Conditions", "Términos y Condiciones")}
+                </a>
+                {L(".", " vigentes.")}
+              </span>
+            </label>
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={checkoutPrivacyAccepted}
+                onChange={(event) => setCheckoutPrivacyAccepted(event.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-amber-300 bg-slate-950 text-emerald-400 accent-emerald-400"
+                required
+              />
+              <span>
+                {L("I have read and accept the current ", "He leído y acepto la ")}
+                <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                  {L("Privacy Policy", "Política de Privacidad")}
+                </a>
+                {L(".", " vigente.")}
+              </span>
+            </label>
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={checkoutDisclosureAccepted}
+                onChange={(event) => setCheckoutDisclosureAccepted(event.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-amber-300 bg-slate-950 text-emerald-400 accent-emerald-400"
+                required
+              />
+              <span>
+                {L(
+                  `I understand the ${FREE_TRIAL_DAYS}-day trial, automatic renewal, prepaid no-refund policy, educational-only use, and no-guaranteed-results disclosure.`,
+                  `Entiendo el trial de ${FREE_TRIAL_DAYS} días, la renovación automática, la política prepago sin reembolso, el uso educativo y la divulgación de resultados no garantizados.`
+                )}
+              </span>
+            </label>
+          </div>
+        </div>
 
         <div className="flex flex-col md:flex-row items-center justify-between gap-3 mt-2">
           <p className="text-[10px] text-slate-500">

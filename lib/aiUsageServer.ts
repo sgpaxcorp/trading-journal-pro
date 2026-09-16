@@ -2,6 +2,7 @@ import "server-only";
 
 import { estimateAiUsageCost } from "@/lib/aiCost";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { requireRuntimeControl } from "@/lib/runtimeControls";
 
 export type AiCostCategory =
   | "shared"
@@ -19,6 +20,9 @@ export async function requireAiBudget(params: {
   userId?: string | null;
   category: AiCostCategory;
 }) {
+  const runtimeGate = await requireRuntimeControl("ai");
+  if (runtimeGate) return runtimeGate;
+
   const enabled = process.env.AI_BUDGETS_ENABLED !== "false" && (
     process.env.NODE_ENV === "production" || process.env.AI_BUDGETS_ENABLED === "true"
   );
@@ -31,13 +35,22 @@ export async function requireAiBudget(params: {
     ? positiveNumber(process.env.AI_BUDGET_SALES_DAILY_USD, 10)
     : 0;
 
-  const { data, error } = await supabaseAdmin.rpc("check_ai_usage_budget", {
+  const estimatedRequestCost = positiveNumber(process.env.AI_BUDGET_REQUEST_RESERVATION_USD, 0.25);
+  const userConcurrencyLimit = Math.floor(positiveNumber(process.env.AI_USER_CONCURRENCY_LIMIT, 4));
+  const globalConcurrencyLimit = Math.floor(positiveNumber(process.env.AI_GLOBAL_CONCURRENCY_LIMIT, 100));
+  const reservationTtlSeconds = Math.floor(positiveNumber(process.env.AI_RESERVATION_TTL_SECONDS, 120));
+
+  const { data, error } = await supabaseAdmin.rpc("reserve_ai_usage_budget", {
     p_user_id: params.userId ?? null,
     p_category: params.category,
+    p_estimated_cost_usd: estimatedRequestCost,
     p_user_daily_limit: userDailyLimit,
     p_global_daily_limit: globalDailyLimit,
     p_global_monthly_limit: globalMonthlyLimit,
     p_category_daily_limit: categoryDailyLimit,
+    p_user_concurrency_limit: userConcurrencyLimit,
+    p_global_concurrency_limit: globalConcurrencyLimit,
+    p_ttl_seconds: reservationTtlSeconds,
   });
 
   if (error) {
@@ -95,6 +108,10 @@ export async function recordAiUsage(params: {
     if (error) {
       console.warn("[ai-usage] Could not persist usage event:", error.message);
     }
+    await supabaseAdmin.rpc("settle_ai_usage_reservation", {
+      p_user_id: params.userId ?? null,
+      p_category: params.category,
+    });
   } catch (error: any) {
     // Cost accounting must never break the customer-facing AI response.
     console.warn("[ai-usage] Unexpected persistence error:", error?.message ?? error);

@@ -11,7 +11,21 @@ Option Flow turns raw flow data into a premarket plan. It is not a signal servic
 2. Generate the report.
 3. Review the executive summary, key levels, and flow map.
 4. Send the plan to your Journal premarket section.
-5. (Optional) Complete the post‑mortem after the session.
+5. Option Flow Intelligence automatically schedules validation for 5:00 PM ET after the next session.
+6. (Optional) Add your manual post‑mortem and screenshot as well.
+
+## Automatic next-session learning
+
+- Keeps timestamped prints between 1:00 PM and 4:00 PM ET.
+- Detects the session date in CSV rows. If a file contains multiple sessions, it analyzes only the selected date instead of mixing days.
+- Recognizes `SPXW` as the weekly `SPX` root and keeps `option_chain_id` to identify each contract.
+- Fetches five-minute underlying candles for the source session and the next market session.
+- Measures the first 0.25% confirmation, minutes from the open, maximum favorable move, maximum adverse move, and close result.
+- Distinguishes a sustained confirmation from an intraday confirmation that later reversed.
+- Evaluates each directional print: CALL bought at ASK, PUT bought at ASK, CALL sold at BID, and PUT sold at BID.
+- Supplies recent validations for the same underlying as context to future analyses without assuming the pattern will repeat.
+
+Validation refers to the underlying move. ASK/BID identifies the aggressor but does not prove whether the position was opened or closed. It does not represent the option's actual P/L or decay, which requires historical contract prices, IV, spread, and fills.
 
 ## What each section means
 **Executive summary**  
@@ -30,7 +44,7 @@ Largest premium or notable prints to review.
 Possible paths and confirmation levels.
 
 ## Inputs and limits
-- Supported formats: CSV, XLS, XLSX
+- Supported formats: CSV, XLSX
 - Max file size: 12 MB
 - Max rows: 400 without screenshots, 150 with screenshots
 - Max screenshots: 2

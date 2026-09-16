@@ -9,6 +9,7 @@ import { resolveLocale } from "@/lib/i18n";
 import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
 import { fetchAccessStatus } from "@/lib/accessStatusClient";
 import {
+  CHECKOUT_DISCLOSURE_VERSION,
   CURRENT_PRIVACY_VERSION,
   CURRENT_TERMS_VERSION,
   FREE_TRIAL_DAYS,
@@ -103,8 +104,16 @@ export default function StartClient({ initialPlan }: StartClientProps) {
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   const [canResend, setCanResend] = useState(true);
-  const [accountLegalAccepted, setAccountLegalAccepted] = useState(false);
-  const [checkoutLegalAccepted, setCheckoutLegalAccepted] = useState(false);
+  const [accountTermsAccepted, setAccountTermsAccepted] = useState(false);
+  const [accountPrivacyAccepted, setAccountPrivacyAccepted] = useState(false);
+  const [accountDisclosureAccepted, setAccountDisclosureAccepted] = useState(false);
+  const [checkoutTermsAccepted, setCheckoutTermsAccepted] = useState(false);
+  const [checkoutPrivacyAccepted, setCheckoutPrivacyAccepted] = useState(false);
+  const [checkoutDisclosureAccepted, setCheckoutDisclosureAccepted] = useState(false);
+  const accountLegalAccepted =
+    accountTermsAccepted && accountPrivacyAccepted && accountDisclosureAccepted;
+  const checkoutLegalAccepted =
+    checkoutTermsAccepted && checkoutPrivacyAccepted && checkoutDisclosureAccepted;
   const allowLocalProfileFallback = shouldAllowLocalProfileAccessFallback();
 
   // Detectar si ya hay usuario logueado
@@ -176,8 +185,8 @@ export default function StartClient({ initialPlan }: StartClientProps) {
     if (!accountLegalAccepted) {
       setError(
         L(
-          "Please accept the Terms & Conditions and Privacy Policy to create your account.",
-          "Acepta los Términos y Condiciones y la Política de Privacidad para crear tu cuenta."
+          "Please complete all required agreements to create your account.",
+          "Completa todos los acuerdos requeridos para crear tu cuenta."
         )
       );
       return;
@@ -203,6 +212,9 @@ export default function StartClient({ initialPlan }: StartClientProps) {
           legalAccepted: true,
           termsVersion: CURRENT_TERMS_VERSION,
           privacyVersion: CURRENT_PRIVACY_VERSION,
+          termsReadAccepted: true,
+          privacyReadAccepted: true,
+          platformDisclosureAccepted: true,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -386,6 +398,10 @@ export default function StartClient({ initialPlan }: StartClientProps) {
           legalAccepted: true,
           termsVersion: CURRENT_TERMS_VERSION,
           privacyVersion: CURRENT_PRIVACY_VERSION,
+          termsReadAccepted: true,
+          privacyReadAccepted: true,
+          checkoutDisclosureAccepted: true,
+          disclosureVersion: CHECKOUT_DISCLOSURE_VERSION,
         }),
       });
 
@@ -484,30 +500,61 @@ export default function StartClient({ initialPlan }: StartClientProps) {
               <p className="mt-1 text-[10px] text-slate-500">{passwordPolicyHint(L)}</p>
             </div>
 
-            <div className="flex flex-col gap-3 pt-2 md:flex-row md:items-center md:justify-between">
-              <label className="flex flex-1 items-start gap-3 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-3 text-[10px] leading-relaxed text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={accountLegalAccepted}
-                  onChange={(event) => setAccountLegalAccepted(event.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
-                  required
-                />
-                <span>
-                  {L("I accept the ", "Acepto los ")}
-                  <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
-                    {L("Terms & Conditions", "Términos y Condiciones")}
-                  </a>
-                  {L(" and ", " y la ")}
-                  <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
-                    {L("Privacy Policy", "Política de Privacidad")}
-                  </a>
-                  {L(
-                    ", and understand the platform is educational only and does not guarantee trading, income, AI coaching, projection, or capital results.",
-                    ", y entiendo que la plataforma es solo educativa y no garantiza resultados de trading, ingresos, AI coaching, proyecciones o capital."
-                  )}
-                </span>
-              </label>
+            <div className="flex flex-col gap-3 pt-2 md:flex-row md:items-start md:justify-between">
+              <div className="flex-1 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-3 text-[10px] leading-relaxed text-slate-300">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                  {L("Required agreements", "Acuerdos requeridos")}
+                </p>
+                <div className="space-y-2.5">
+                  <label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={accountTermsAccepted}
+                      onChange={(event) => setAccountTermsAccepted(event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                      required
+                    />
+                    <span>
+                      {L("I have read and accept the current ", "He leído y acepto los ")}
+                      <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                        {L("Terms & Conditions", "Términos y Condiciones")}
+                      </a>
+                      {L(".", " vigentes.")}
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={accountPrivacyAccepted}
+                      onChange={(event) => setAccountPrivacyAccepted(event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                      required
+                    />
+                    <span>
+                      {L("I have read and accept the current ", "He leído y acepto la ")}
+                      <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                        {L("Privacy Policy", "Política de Privacidad")}
+                      </a>
+                      {L(".", " vigente.")}
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={accountDisclosureAccepted}
+                      onChange={(event) => setAccountDisclosureAccepted(event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                      required
+                    />
+                    <span>
+                      {L(
+                        "I understand the platform is educational only and does not guarantee trading, income, AI coaching, projection, or capital results.",
+                        "Entiendo que la plataforma es solo educativa y no garantiza resultados de trading, ingresos, AI coaching, proyecciones o capital."
+                      )}
+                    </span>
+                  </label>
+                </div>
+              </div>
               <button
                 type="submit"
                 disabled={loadingInfo || !accountLegalAccepted}
@@ -745,21 +792,60 @@ export default function StartClient({ initialPlan }: StartClientProps) {
             </p>
           </div>
 
-          <label className="mb-4 flex items-start gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-3 text-[10px] leading-relaxed text-amber-100/90">
-            <input
-              type="checkbox"
-              checked={checkoutLegalAccepted}
-              onChange={(event) => setCheckoutLegalAccepted(event.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-amber-300 bg-slate-950 text-emerald-400 accent-emerald-400"
-              required
-            />
-            <span>
-              {L(
-                `I understand this starts a ${FREE_TRIAL_DAYS}-day free trial if eligible, then charges automatically unless canceled before the trial ends. Paid subscription periods are prepaid, canceling stops future renewals, and access continues until the paid period ends. No financial advice or guaranteed results are provided.`,
-                `Entiendo que esto comienza un trial gratis de ${FREE_TRIAL_DAYS} días si soy elegible, luego cobra automáticamente salvo que cancele antes de terminar el trial. Los periodos pagados son prepagados, cancelar detiene renovaciones futuras y el acceso continúa hasta que termine el periodo pagado. No se provee asesoría financiera ni resultados garantizados.`
-              )}
-            </span>
-          </label>
+          <div className="mb-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-3 text-[10px] leading-relaxed text-amber-100/90">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-100">
+              {L("Required subscription agreements", "Acuerdos requeridos de suscripción")}
+            </p>
+            <div className="space-y-2.5">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={checkoutTermsAccepted}
+                  onChange={(event) => setCheckoutTermsAccepted(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-amber-300 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L("I have read and accept the current ", "He leído y acepto los ")}
+                  <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                    {L("Terms & Conditions", "Términos y Condiciones")}
+                  </a>
+                  {L(".", " vigentes.")}
+                </span>
+              </label>
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={checkoutPrivacyAccepted}
+                  onChange={(event) => setCheckoutPrivacyAccepted(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-amber-300 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L("I have read and accept the current ", "He leído y acepto la ")}
+                  <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                    {L("Privacy Policy", "Política de Privacidad")}
+                  </a>
+                  {L(".", " vigente.")}
+                </span>
+              </label>
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={checkoutDisclosureAccepted}
+                  onChange={(event) => setCheckoutDisclosureAccepted(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-amber-300 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L(
+                    `I understand this starts a ${FREE_TRIAL_DAYS}-day free trial if eligible, then charges automatically unless canceled before the trial ends. Paid subscription periods are prepaid, canceling stops future renewals, and access continues until the paid period ends. No financial advice or guaranteed results are provided.`,
+                    `Entiendo que esto comienza un trial gratis de ${FREE_TRIAL_DAYS} días si soy elegible, luego cobra automáticamente salvo que cancele antes de terminar el trial. Los periodos pagados son prepagados, cancelar detiene renovaciones futuras y el acceso continúa hasta que termine el periodo pagado. No se provee asesoría financiera ni resultados garantizados.`
+                  )}
+                </span>
+              </label>
+            </div>
+          </div>
 
           <div className="flex items-center justify-between">
             <button

@@ -19,7 +19,6 @@ const ALL_ACCESS_KEYS = [
   "page_notebook",
   "page_back_study",
   "page_rules_alarms",
-  "page_forum",
 ];
 
 function loadEnvFile(filePath) {

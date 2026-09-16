@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { resolveStripeBillingIdentity } from "@/lib/stripeBillingIdentity";
 
 export const runtime = "nodejs";
 
@@ -22,24 +23,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ invoices: [] }, { status: 401 });
     }
 
-    const userId = authData.user.id;
-    const email = authData.user.email ?? "";
-
-    let customerId: string | null = null;
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("stripe_customer_id")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profile?.stripe_customer_id) {
-      customerId = String(profile.stripe_customer_id);
-    } else if (email) {
-      const existing = await stripe.customers.list({ email, limit: 1 });
-      if (existing.data.length > 0) {
-        customerId = existing.data[0].id;
-      }
-    }
+    const billingIdentity = await resolveStripeBillingIdentity(stripe, authData.user);
+    const customerId = billingIdentity.customerId;
 
     if (!customerId) {
       return NextResponse.json({ invoices: [] });

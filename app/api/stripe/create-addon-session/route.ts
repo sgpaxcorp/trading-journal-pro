@@ -4,13 +4,18 @@ import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { BROKER_SYNC_ADDON } from "@/lib/planCatalog";
-import { isCurrentLegalAcceptancePayload } from "@/lib/legalConsent";
+import {
+  CHECKOUT_DISCLOSURE_VERSION,
+  isCurrentCheckoutLegalAcceptancePayload,
+} from "@/lib/legalConsent";
 import { recordLegalAcceptance } from "@/lib/serverLegalAcceptance";
 import {
   isMissingStripePriceError,
   resolveStripePriceId,
   STRIPE_PRICE_CONFIG_ERROR,
 } from "@/lib/stripePriceResolver";
+import { resolveStripeBillingIdentity } from "@/lib/stripeBillingIdentity";
+import { requireRuntimeControl } from "@/lib/runtimeControls";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "").trim();
@@ -38,6 +43,9 @@ function resolveAppUrl(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const runtimeGate = await requireRuntimeControl("checkout");
+  if (runtimeGate) return runtimeGate;
+
   try {
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
@@ -71,9 +79,13 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    if (!isCurrentLegalAcceptancePayload(body)) {
+    if (!isCurrentCheckoutLegalAcceptancePayload(body)) {
       return NextResponse.json(
-        { error: "You must accept the current Terms & Conditions and Privacy Policy before checkout." },
+        {
+          error:
+            "You must accept the current Terms & Conditions, Privacy Policy, and subscription disclosures before checkout.",
+          disclosureVersion: CHECKOUT_DISCLOSURE_VERSION,
+        },
         { status: 400 }
       );
     }
@@ -110,6 +122,9 @@ export async function POST(req: NextRequest) {
         metadata: {
           addonKey,
           billingCycle,
+          termsReadAccepted: Boolean(body.termsReadAccepted),
+          privacyReadAccepted: Boolean(body.privacyReadAccepted),
+          checkoutDisclosureAccepted: Boolean(body.checkoutDisclosureAccepted),
           disclosureVersion: body.disclosureVersion ?? "",
         },
       });
@@ -121,22 +136,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Ensure customer exists
-    let customerId: string | undefined;
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("stripe_customer_id")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profile?.stripe_customer_id) {
-      customerId = String(profile.stripe_customer_id);
-    } else if (email) {
-      const existing = await stripe.customers.list({ email, limit: 1 });
-      if (existing.data.length > 0) {
-        customerId = existing.data[0].id;
-      }
-    }
+    const billingIdentity = await resolveStripeBillingIdentity(stripe, { id: userId, email });
+    let customerId = billingIdentity.customerId ?? undefined;
 
     if (!customerId) {
       const created = await stripe.customers.create({

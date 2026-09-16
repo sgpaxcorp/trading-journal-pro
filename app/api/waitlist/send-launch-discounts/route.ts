@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 
 import { requireCronSecret } from "@/lib/cronAuth";
 import { WAITLIST_CAMPAIGN } from "@/lib/waitlistCampaign";
@@ -6,6 +6,8 @@ import {
   dispatchWaitlistLaunch,
   getWaitlistLaunchOverview,
 } from "@/lib/waitlistLaunchDelivery";
+import { requireRuntimeControl } from "@/lib/runtimeControls";
+import { processEmailDeliveryBatch } from "@/lib/emailDeliveryWorker";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -33,6 +35,9 @@ async function handleRequest(req: NextRequest) {
   const cronAuth = requireCronSecret(req);
   if (!cronAuth.ok) return cronAuth.response;
 
+  const runtimeGate = await requireRuntimeControl("email_delivery");
+  if (runtimeGate) return runtimeGate;
+
   const options = await readRequestOptions(req);
   const launchAt = new Date(WAITLIST_CAMPAIGN.launchDateIso).getTime();
 
@@ -54,6 +59,11 @@ async function handleRequest(req: NextRequest) {
 
   try {
     const result = await dispatchWaitlistLaunch({ mode: "pending", limit: options.limit });
+    after(async () => {
+      await processEmailDeliveryBatch(25).catch((error) => {
+        console.error("[waitlist-launch] background email worker error:", error);
+      });
+    });
     return NextResponse.json({ ok: true, dryRun: false, result });
   } catch (error) {
     console.error("[waitlist-launch] automated delivery failed:", error);

@@ -59,7 +59,6 @@ export type MobilePlanAccess = {
   hasNotebook: boolean;
   hasBackStudy: boolean;
   hasRulesAlarms: boolean;
-  hasForum: boolean;
   hasOrderAudit: boolean;
   hasBrokerSync: boolean;
   refresh: () => Promise<void>;
@@ -117,7 +116,6 @@ export function usePlanAccess(): MobilePlanAccess {
       hasNotebook: hasGrant("page_notebook") || hasAdvancedPlan,
       hasBackStudy: hasGrant("page_back_study") || hasAdvancedPlan,
       hasRulesAlarms: hasGrant("page_rules_alarms") || hasCorePlan,
-      hasForum: hasGrant("page_forum"),
       hasOrderAudit: hasGrant("page_order_audit") || hasAdvancedPlan,
       hasBrokerSync: brokerSyncFree || hasGrant("broker_sync"),
       refresh,

@@ -4,7 +4,11 @@ import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { BROKER_SYNC_ADDON, PLAN_PRICES } from "@/lib/planCatalog";
-import { FREE_TRIAL_DAYS, isCurrentLegalAcceptancePayload } from "@/lib/legalConsent";
+import {
+  CHECKOUT_DISCLOSURE_VERSION,
+  FREE_TRIAL_DAYS,
+  isCurrentCheckoutLegalAcceptancePayload,
+} from "@/lib/legalConsent";
 import { recordLegalAcceptance } from "@/lib/serverLegalAcceptance";
 import { WAITLIST_CAMPAIGN } from "@/lib/waitlistCampaign";
 import {
@@ -12,6 +16,8 @@ import {
   resolveStripePriceId,
   STRIPE_PRICE_CONFIG_ERROR,
 } from "@/lib/stripePriceResolver";
+import { resolveStripeBillingIdentity } from "@/lib/stripeBillingIdentity";
+import { requireRuntimeControl } from "@/lib/runtimeControls";
 
 type PlanId = "core" | "advanced";
 type BillingCycle = "monthly" | "annual";
@@ -190,6 +196,9 @@ async function verifyWaitlistLaunchEligibility(email: string, billingCycle: Bill
 }
 
 export async function POST(req: NextRequest) {
+  const runtimeGate = await requireRuntimeControl("checkout");
+  if (runtimeGate) return runtimeGate;
+
   try {
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
@@ -223,9 +232,13 @@ export async function POST(req: NextRequest) {
     const addonBrokerSync = Boolean(body.addonBrokerSync);
     const partnerCode = normalizePartnerCode(body.partnerCode);
 
-    if (!isCurrentLegalAcceptancePayload(body)) {
+    if (!isCurrentCheckoutLegalAcceptancePayload(body)) {
       return NextResponse.json(
-        { error: "You must accept the current Terms & Conditions and Privacy Policy before checkout." },
+        {
+          error:
+            "You must accept the current Terms & Conditions, Privacy Policy, and subscription disclosures before checkout.",
+          disclosureVersion: CHECKOUT_DISCLOSURE_VERSION,
+        },
         { status: 400 }
       );
     }
@@ -253,6 +266,9 @@ export async function POST(req: NextRequest) {
           planId,
           billingCycle: finalBillingCycle,
           addonBrokerSync,
+          termsReadAccepted: Boolean(body.termsReadAccepted),
+          privacyReadAccepted: Boolean(body.privacyReadAccepted),
+          checkoutDisclosureAccepted: Boolean(body.checkoutDisclosureAccepted),
           disclosureVersion: body.disclosureVersion ?? "",
         },
       });
@@ -284,30 +300,14 @@ export async function POST(req: NextRequest) {
       partnerUserId = partnerId;
     }
 
-    // =====================================================
-    // Ensure we have an existing Customer in Stripe
-    // =====================================================
-    let customerId: string | undefined;
-
-    // 1) Try profile stripe_customer_id
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("stripe_customer_id, stripe_subscription_id, subscription_status")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profile?.stripe_customer_id) {
-      customerId = String(profile.stripe_customer_id);
-    } else if (email) {
-      // 2) Try to find an existing Customer by email
-      const existing = await stripe.customers.list({ email, limit: 1 });
-      if (existing.data.length > 0) {
-        customerId = existing.data[0].id;
-      }
-    }
+    const billingIdentity = await resolveStripeBillingIdentity(
+      stripe,
+      { id: userId, email },
+      { includeSubscription: true }
+    );
+    let customerId = billingIdentity.customerId ?? undefined;
 
     if (!customerId) {
-      // 3) Create a new Customer if none exists yet
       const created = await stripe.customers.create({
         email: email || undefined,
         metadata: {
@@ -317,9 +317,8 @@ export async function POST(req: NextRequest) {
       customerId = created.id;
     }
 
-    const profileSubscriptionId = String((profile as any)?.stripe_subscription_id ?? "").trim();
-    const profileStatus = String((profile as any)?.subscription_status ?? "").trim().toLowerCase();
-    let hasPriorStripeSubscription = Boolean(profileSubscriptionId);
+    let hasPriorStripeSubscription = Boolean(billingIdentity.subscriptionId);
+    const entitlementStatus = billingIdentity.entitlementStatus ?? "";
 
     if (customerId && !hasPriorStripeSubscription) {
       const priorSubscriptions = await stripe.subscriptions.list({
@@ -439,7 +438,7 @@ export async function POST(req: NextRequest) {
       !promoDiscountInfo?.isTesterAllAccess &&
       !promoDiscountInfo?.isFree &&
       !hasPriorStripeSubscription &&
-      !["active", "trialing", "paid", "past_due", "unpaid"].includes(profileStatus);
+      !["active", "trialing", "paid", "past_due", "unpaid"].includes(entitlementStatus);
 
     const subscriptionData: Stripe.Checkout.SessionCreateParams.SubscriptionData = {
       metadata: {

@@ -44,6 +44,7 @@ test.describe("Neuro Analysis private workspace", () => {
 
     await signInToNeuro(page);
     await marketResponse;
+    await page.getByRole("button", { name: /profiles/i }).click();
     await expect(page.getByRole("link", { name: /business notebook/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /open navigation|abrir navegación/i })).toBeHidden();
     await expect(page.getByRole("textbox", { name: /active ticker|ticker activo/i })).toHaveCount(1);
@@ -67,6 +68,7 @@ test.describe("Neuro Analysis private workspace", () => {
 
     await signInToNeuro(page);
     await marketResponse;
+    await page.getByRole("button", { name: /profiles/i }).click();
     await expect(page.getByRole("button", { name: /open navigation|abrir navegación/i })).toBeVisible();
     const topNavHeight = await page.locator("nav.nt-topnav").evaluate((element) => element.getBoundingClientRect().height);
     expect(topNavHeight).toBeLessThanOrEqual(90);

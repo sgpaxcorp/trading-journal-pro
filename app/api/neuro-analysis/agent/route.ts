@@ -5,6 +5,12 @@ import { createHash } from "node:crypto";
 import { getAuthUser } from "@/lib/authServer";
 import { countResponseFileSearchCalls, recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 import {
+  AI_TRADE_PROPOSAL_DISABLED_PROMPT,
+  enforceAiTradeProposalControl,
+  getEmergencyPortfolioControls,
+  requirePortfolioWriteAccess,
+} from "@/lib/emergencyPortfolioControls";
+import {
   appendNeuroWebSources,
   buildNeuroAnalysisQuestionInput,
   extractNeuroWebSources,
@@ -19,6 +25,16 @@ import { getNeuroCase, insertNeuroSnapshot, listNeuroReports, listNeuroSnapshots
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import {
+  appendFinancialTraceabilityAppendix,
+  enforceResearchFinancialIntegrity,
+  mergeFinancialIntegrityManifests,
+} from "@/lib/neuroFinancialDataIntegrity";
+import { enforceInvestmentProbabilityIntegrity } from "@/lib/neuroInvestmentProbabilityIntegrity";
+import {
+  enforceMasterInvestmentSystemOutput,
+  withMasterInvestmentSystemPrinciple,
+} from "@/lib/neuroMasterInvestmentPrinciple";
 
 export const runtime = "nodejs";
 
@@ -146,6 +162,9 @@ export async function POST(req: Request) {
 
     const smartToolsGate = await requireSmartToolsOwner(authUser);
     if (smartToolsGate) return smartToolsGate;
+    const emergencyWriteGate = await requirePortfolioWriteAccess();
+    if (emergencyWriteGate) return emergencyWriteGate;
+    const emergencyControls = await getEmergencyPortfolioControls();
 
     const rate = await rateLimit(`neuro-analysis:agent:${authUser.userId}`, {
       limit: 8,
@@ -184,6 +203,13 @@ export async function POST(req: Request) {
     }
 
     const reports = caseId ? await listNeuroReports(authUser.userId, caseId) : [];
+    const financialDataIntegrity = mergeFinancialIntegrityManifests([
+      reports[0]?.structured?.financialDataIntegrity,
+      reports[0]?.engine?.financialDataIntegrity,
+      clientContext?.engineSnapshot?.financialDataIntegrity,
+      clientContext?.marketData?.financialDataIntegrity,
+      ...Object.values(clientContext?.marketData?.items ?? {}).map((item: any) => item?.financialDataIntegrity),
+    ]);
     const tickers = tickersFromContext(researchCase, clientContext);
     const [filings, priorMemory] = await Promise.all([
       loadFilingMetadata(authUser.userId, tickers),
@@ -199,8 +225,18 @@ export async function POST(req: Request) {
         memory?.contextSignature === clientContextSignature
     );
     if (cachedAnswer) {
+      const cachedAudit = enforceResearchFinancialIntegrity(cachedAnswer.answer, financialDataIntegrity);
+      const cachedProbabilityAudit = enforceInvestmentProbabilityIntegrity(cachedAudit.report);
+      const cachedProposalAudit = enforceAiTradeProposalControl(
+        cachedProbabilityAudit.text,
+        emergencyControls.aiTradeProposalsEnabled
+      );
       return NextResponse.json({
-        answer: cachedAnswer.answer,
+        answer: appendFinancialTraceabilityAppendix(
+          cachedProposalAudit.text,
+          financialDataIntegrity,
+          cachedAudit.usedTraceIds
+        ),
         responseId: null,
         model: MODEL,
         webSources: [],
@@ -244,19 +280,25 @@ export async function POST(req: Request) {
       ...(webSearchTool ? ["web_search_call.action.sources"] : []),
     ];
 
-    const responseInput = buildNeuroAnalysisQuestionInput({
+    const responseInput = `${buildNeuroAnalysisQuestionInput({
         question,
         caseContext: researchCase,
         latestReports: reports,
         filings,
         priorMemory,
         clientContext,
-      });
+      })}\n\nFINANCIAL DATA INTEGRITY LEDGER:\n${JSON.stringify(financialDataIntegrity, null, 2)}${
+        emergencyControls.aiTradeProposalsEnabled
+          ? ""
+          : `\n\n${AI_TRADE_PROPOSAL_DISABLED_PROMPT}`
+      }`;
     const createResponse = (reasoningEffort?: string) =>
       client.responses.create({
         model: MODEL,
         reasoning: neuroReasoningConfig(MODEL, reasoningEffort) as any,
-        instructions: NEURO_ANALYSIS_QA_SYSTEM_PROMPT,
+        instructions: withMasterInvestmentSystemPrinciple(
+          NEURO_ANALYSIS_QA_SYSTEM_PROMPT
+        ),
         input: responseInput,
         tools,
         include: include.length > 0 ? (include as any) : undefined,
@@ -280,7 +322,28 @@ export async function POST(req: Request) {
     }
 
     const webSources = extractNeuroWebSources(response);
-    const answer = appendNeuroWebSources(sanitizeNeuroAnalysisOutput(response.output_text), webSources);
+    const integrityAudit = enforceResearchFinancialIntegrity(
+      sanitizeNeuroAnalysisOutput(response.output_text),
+      financialDataIntegrity
+    );
+    const investmentProbabilityAudit = enforceInvestmentProbabilityIntegrity(
+      integrityAudit.report
+    );
+    const aiTradeProposalAudit = enforceAiTradeProposalControl(
+      investmentProbabilityAudit.text,
+      emergencyControls.aiTradeProposalsEnabled
+    );
+    const masterInvestmentSystemAudit = enforceMasterInvestmentSystemOutput(
+      aiTradeProposalAudit.text
+    );
+    const answer = appendNeuroWebSources(
+      appendFinancialTraceabilityAppendix(
+        masterInvestmentSystemAudit.text,
+        financialDataIntegrity,
+        integrityAudit.usedTraceIds
+      ),
+      webSources
+    );
     if (!answer.trim()) throw new Error("The research agent produced an empty answer.");
     const tokenUsage = neuroResponseTokenUsage(response);
 
@@ -302,6 +365,24 @@ export async function POST(req: Request) {
         reportCount: reports.length,
         filingCount: filings.length,
         usage: tokenUsage,
+        financialDataIntegrityAudit: {
+          replacedClaimCount: integrityAudit.replacedClaimCount,
+          citedRecordIds: integrityAudit.usedTraceIds,
+        },
+        investmentProbabilityIntegrityAudit: {
+          blockedClaimCount: investmentProbabilityAudit.blockedClaimCount,
+          validatedStatisticalModelUsed:
+            investmentProbabilityAudit.validatedStatisticalModelUsed,
+        },
+        masterInvestmentSystemAudit: {
+          policyVersion: masterInvestmentSystemAudit.policyVersion,
+          blockedClaimCount: masterInvestmentSystemAudit.blockedClaimCount,
+        },
+        emergencyPortfolioControlAudit: {
+          aiTradeProposalsEnabled: emergencyControls.aiTradeProposalsEnabled,
+          blockedProposalCount: aiTradeProposalAudit.blockedProposalCount,
+          controlVersion: emergencyControls.version,
+        },
       },
     });
 

@@ -4,6 +4,17 @@ import { getOptionFlowBetaApiPayload, hasOptionFlowBetaAccess, resolveOptionFlow
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
+import {
+  addCalendarDays,
+  buildLateSessionTrackedFlows,
+  flowRowSessionDate,
+  flowSessionDates,
+  marketDateKey,
+  normalizeFlowSessionDateValue,
+  optionFlowUnderlyingsMatch,
+  resolveSourceSessionDate,
+} from "@/lib/optionFlowLearning";
+import { scheduleOptionFlowLearning } from "@/lib/optionFlowLearningServer";
 
 export const runtime = "nodejs";
 
@@ -100,6 +111,15 @@ function pickField(
     const match = entries.find(([k]) => {
       const lowered = k.toLowerCase();
       if (excludes.length && excludes.some((ex) => lowered.includes(ex))) return false;
+      return lowered === needle;
+    });
+    if (match) return match[1];
+  }
+  for (const key of keys) {
+    const needle = key.toLowerCase();
+    const match = entries.find(([k]) => {
+      const lowered = k.toLowerCase();
+      if (excludes.length && excludes.some((ex) => lowered.includes(ex))) return false;
       return lowered.includes(needle);
     });
     if (match) return match[1];
@@ -154,7 +174,16 @@ function normalizeTimestamp(dateRaw?: string | null, timeRaw?: string | null): s
 }
 
 function normalizeFlowRow(row: Record<string, any>) {
-  const symbolRaw = pickField(row, ["symbol", "ticker", "root", "option", "contract"]);
+  const symbolRaw = pickField(row, [
+    "option_chain_id",
+    "option chain id",
+    "option symbol",
+    "symbol",
+    "ticker",
+    "root",
+    "option",
+    "contract",
+  ]);
   const underlyingRaw = pickField(row, ["underlying", "underlying_symbol", "underlying symbol", "underlyingticker", "underlying ticker"]);
   const dateRaw = pickField(row, ["date", "trade date"]);
   const expiryRaw = pickField(row, ["expiry", "expiration", "exp", "date"]);
@@ -171,15 +200,15 @@ function normalizeFlowRow(row: Record<string, any>) {
   const sizeRaw = pickField(row, ["size", "qty", "quantity", "volume"]);
   const premiumRaw = pickField(row, ["premium", "notional", "value", "cost"]);
   const oiRaw = pickField(row, ["oi", "open interest", "open_interest", "openinterest"]);
-  const bidRaw = pickField(row, ["bid"]);
-  const askRaw = pickField(row, ["ask"]);
+  const bidRaw = pickField(row, ["nbbo_bid", "nbbo bid", "bid"]);
+  const askRaw = pickField(row, ["nbbo_ask", "nbbo ask", "ask"]);
   const tradeRaw = pickField(
     row,
     ["trade price", "trade_price", "option price", "fill", "executed", "price", "trade"],
     { exclude: ["strike", "bid", "ask", "premium", "fair", "reference"] }
   );
   const deltaRaw = pickField(row, ["delta"]);
-  const ivRaw = pickField(row, ["iv", "implied vol", "implied_vol"]);
+  const ivRaw = pickField(row, ["implied_volatility", "implied volatility", "iv", "implied vol", "implied_vol"]);
   const timeRaw = pickField(row, ["time", "timestamp", "trade time"]);
   const underlyingPriceRaw = pickField(row, ["underlying_price", "underlying price", "spot", "reference price"]);
 
@@ -226,6 +255,8 @@ function normalizeFlowRow(row: Record<string, any>) {
   return {
     symbol: typeof symbol === "string" ? symbol : null,
     underlying: normalizedUnderlying,
+    sourceSessionDate:
+      normalizeFlowSessionDateValue(dateRaw) || flowRowSessionDate(row),
     expiry: typeof expiryRaw === "string" ? normalizeExpiry(expiryRaw) : null,
     strike,
     type: type || null,
@@ -238,7 +269,7 @@ function normalizeFlowRow(row: Record<string, any>) {
     tradePrice,
     delta,
     iv,
-    time: typeof timeRaw === "string" ? timeRaw : null,
+    time: timeRaw != null ? String(timeRaw) : null,
     timestamp,
     underlyingPrice,
     raw: row,
@@ -637,6 +668,7 @@ export async function POST(req: NextRequest) {
       underlying,
       previousClose,
       tradeIntent,
+      sourceSessionDate,
       rows,
       screenshotDataUrls,
       analystNotes,
@@ -646,16 +678,23 @@ export async function POST(req: NextRequest) {
       underlying?: string;
       previousClose?: number;
       tradeIntent?: string;
+      sourceSessionDate?: string;
       rows?: any[];
       screenshotDataUrls?: string[];
       analystNotes?: string | null;
       language?: string;
     };
 
-    const trimmedRows = safeRows(rows ?? [], 200);
+    const trimmedRows = safeRows(rows ?? [], 500);
     const safeScreenshots = safeScreenshotDataUrls(screenshotDataUrls);
     const safeAnalystNotes = String(analystNotes ?? "").slice(0, 3000);
     const safeTradeIntent = String(tradeIntent ?? "").slice(0, 1000);
+    const marketToday = marketDateKey(new Date());
+    const requestedSourceSessionDate = /^\d{4}-\d{2}-\d{2}$/.test(String(sourceSessionDate ?? "")) &&
+      String(sourceSessionDate) >= addCalendarDays(marketToday, -55) &&
+      String(sourceSessionDate) <= marketToday
+        ? String(sourceSessionDate)
+        : null;
 
     const lang = String(language || "en").toLowerCase().startsWith("es") ? "es" : "en";
     const isEs = lang === "es";
@@ -686,6 +725,7 @@ NO inventes datos ni conclusiones fuera del payload. Si falta data, dilo explíc
 No seas complaciente ni le digas al usuario lo que quiere escuchar: sé objetivo con la data.
 Si dataQuality.isStale es true (expiraciones ya vencidas o timestamps viejos), indica que la data es vieja (-1DTE o anterior) y que el análisis es histórico.
 Usa recentOutcomes solo como feedback contextual; no debe reemplazar la data actual.
+Usa recentValidations para calibrar cuánto tardaron flows similares en confirmarse o fallar, sin asumir que el patrón se repetirá.
 Incluye en "riskNotes" un disclosure corto indicando que el análisis se basa solo en la data enviada y puede estar incompleto si faltan prints BID/ASK o filas.
 IMPORTANTE: Solo considera flujo agresivo cuando el print está en ASK (entradas direccionales) o BID (venta de prima).
 Si está en MID/MIXED/UNKNOWN no lo clasifiques como agresivo.
@@ -786,6 +826,7 @@ Do NOT invent data or conclusions outside the payload. If data is missing, say i
 Do not be agreeable or tell the user what they want to hear; be objective with the data.
 If dataQuality.isStale is true (expired dates or old timestamps), explicitly say the data is old (-1DTE or earlier) and the analysis is historical.
 Use recentOutcomes only as contextual feedback; it must not override current data.
+Use recentValidations to calibrate how long similar flows took to confirm or fail, without assuming the pattern will repeat.
 Include a short disclosure in "riskNotes" stating the analysis is based only on the provided data and may be incomplete if BID/ASK prints or rows are missing.
 IMPORTANT: Only consider aggressive flow when prints are at ASK (directional entries) or BID (premium selling).
 If prints are MID/MIXED/UNKNOWN, do not classify as aggressive.
@@ -912,6 +953,35 @@ Return only valid JSON with this shape:
       recentOutcomes = [];
     }
 
+    let recentValidations: any[] = [];
+    try {
+      if (underlying) {
+        const { data } = await supabaseAdmin
+          .from("option_flow_learning_runs")
+          .select("source_session_date,target_session_date,analysis_snapshot,market_validation")
+          .eq("user_id", userId)
+          .eq("underlying", normalizeSymbol(underlying))
+          .eq("status", "completed")
+          .order("evaluated_at", { ascending: false })
+          .limit(8);
+        if (Array.isArray(data)) {
+          recentValidations = data.map((row: any) => ({
+            sourceDate: row.source_session_date,
+            targetDate: row.target_session_date,
+            priorBias: row.analysis_snapshot?.flowBias ?? null,
+            verdict: row.market_validation?.thesis?.verdict ?? null,
+            firstConfirmedAt: row.market_validation?.thesis?.firstConfirmedAt ?? null,
+            minutesFromOpen: row.market_validation?.thesis?.minutesFromOpen ?? null,
+            maxFavorablePct: row.market_validation?.thesis?.maxFavorablePct ?? null,
+            maxAdversePct: row.market_validation?.thesis?.maxAdversePct ?? null,
+            closeDirectionalPct: row.market_validation?.thesis?.closeDirectionalPct ?? null,
+          }));
+        }
+      }
+    } catch {
+      recentValidations = [];
+    }
+
     const ocrRows = await extractRowsFromScreenshots(
       safeScreenshots,
       provider,
@@ -926,9 +996,26 @@ Return only valid JSON with this shape:
       if (target) {
         normalizedRows = normalizedRows.filter((row) => {
           const rowUnderlying = normalizeSymbol(row.underlying || row.symbol || "");
-          return rowUnderlying && (rowUnderlying === target || rowUnderlying.startsWith(target));
+          return rowUnderlying && optionFlowUnderlyingsMatch(rowUnderlying, target);
         });
       }
+    }
+    if (requestedSourceSessionDate) {
+      const availableSessionDates = flowSessionDates(normalizedRows);
+      if (availableSessionDates.length && !availableSessionDates.includes(requestedSourceSessionDate)) {
+        return NextResponse.json(
+          {
+            error: isEs
+              ? `El archivo no contiene flows del ${requestedSourceSessionDate}. Fechas disponibles: ${availableSessionDates.join(", ")}.`
+              : `The file has no flows for ${requestedSourceSessionDate}. Available dates: ${availableSessionDates.join(", ")}.`,
+          },
+          { status: 400 }
+        );
+      }
+      normalizedRows = normalizedRows.filter((row) => {
+        const rowDate = flowRowSessionDate(row);
+        return !rowDate || rowDate === requestedSourceSessionDate;
+      });
     }
 
     const { expirationsList, flowTotals } = aggregateRows(normalizedRows);
@@ -983,9 +1070,11 @@ Return only valid JSON with this shape:
       underlying,
       previousClose,
       tradeIntent: safeTradeIntent,
+      sourceSessionDate: requestedSourceSessionDate,
       analystNotes: safeAnalystNotes,
       recentMemory,
       recentOutcomes,
+      recentValidations,
       dataQuality,
       flowTotals,
       flowFeatures,
@@ -1061,6 +1150,7 @@ Return only valid JSON with this shape:
     const tradingPlan =
       parsed?.tradingPlan && typeof parsed.tradingPlan === "object" ? parsed.tradingPlan : null;
 
+    const analysisCreatedAt = new Date().toISOString();
     let uploadId: string | null = null;
     try {
       const { data: insert, error: insErr } = await supabaseAdmin
@@ -1074,7 +1164,7 @@ Return only valid JSON with this shape:
           summary: summary ?? null,
           key_levels: keyLevels ?? [],
           key_trades: keyTrades ?? [],
-          created_at: new Date().toISOString(),
+          created_at: analysisCreatedAt,
         })
         .select("id")
         .single();
@@ -1083,6 +1173,45 @@ Return only valid JSON with this shape:
       }
     } catch (e) {
       console.warn("[option-flow] memory insert failed:", e);
+    }
+
+    let learningRun: any = null;
+    const rowUnderlyings = Array.from(
+      new Set(
+        normalizedRows
+          .map((row) => normalizeSymbol(row.underlying))
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+    const learningUnderlying = normalizeSymbol(underlying) ||
+      (rowUnderlyings.length === 1 ? rowUnderlyings[0] : null);
+    if (uploadId && learningUnderlying) {
+      try {
+        const trackedFlows = buildLateSessionTrackedFlows(normalizedRows, learningUnderlying);
+        learningRun = await scheduleOptionFlowLearning({
+          userId,
+          memoryId: uploadId,
+          underlying: learningUnderlying,
+          sourceSessionDate: requestedSourceSessionDate || resolveSourceSessionDate(normalizedRows),
+          provider: provider ?? null,
+          tradeIntent: tradeIntent ?? null,
+          trackedFlows,
+          analysisSnapshot: {
+            createdAt: analysisCreatedAt,
+            summary,
+            flowBias,
+            previousClose: previousClose ?? null,
+            spotEstimate,
+            keyLevels,
+            keyTrades,
+            flowTotals,
+            lateSessionWindow: "13:00-16:00 America/New_York",
+            trackedFlowCount: trackedFlows.length,
+          },
+        });
+      } catch (error) {
+        console.warn("[option-flow] learning schedule failed:", error);
+      }
     }
 
     return NextResponse.json({
@@ -1103,6 +1232,7 @@ Return only valid JSON with this shape:
       suggestedFocus: parsed?.suggestedFocus ?? [],
       dataQuality,
       uploadId,
+      learningRun,
     });
   } catch (err: any) {
     console.error("[option-flow/analyze] error:", err);

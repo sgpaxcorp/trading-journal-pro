@@ -8,6 +8,13 @@ import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { getOptionFlowBetaCopy } from "@/lib/optionFlowBetaCopy";
+import {
+  addCalendarDays,
+  flowRowSessionDate,
+  marketClockMinutes,
+  marketDateKey,
+  resolveFlowSessionDateForRows,
+} from "@/lib/optionFlowLearning";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
@@ -121,6 +128,7 @@ type AnalysisData = {
     tradeIntent?: string;
     previousClose?: number | null;
     createdAt?: string;
+    sourceSessionDate?: string;
   };
 };
 
@@ -130,6 +138,64 @@ type OptionFlowArchive = {
   file_path?: string | null;
   created_at: string;
   expires_at: string;
+};
+
+type OptionFlowLearningEvaluation = {
+  direction?: "bullish" | "bearish" | "unknown";
+  verdict?: "supports" | "partially_supports" | "does_not_support" | "insufficient_data";
+  referencePrice?: number;
+  firstConfirmedAt?: string | null;
+  minutesFromOpen?: number | null;
+  maxFavorablePct?: number;
+  maxAdversePct?: number;
+  closeDirectionalPct?: number;
+  closeRawPct?: number;
+};
+
+type OptionFlowLearningRun = {
+  id: string;
+  memory_id?: string | null;
+  underlying: string;
+  source_session_date: string;
+  target_session_date: string;
+  evaluation_due_at: string;
+  status: "pending" | "retry" | "completed" | "failed";
+  tracked_flows?: Array<{
+    contract?: string;
+    type?: string | null;
+    side?: string;
+    direction?: string;
+    time?: string | null;
+    premium?: number;
+    evaluation?: OptionFlowLearningEvaluation | null;
+  }>;
+  market_validation?: {
+    targetSession?: {
+      open?: number;
+      high?: number;
+      low?: number;
+      close?: number;
+      gapPct?: number;
+      closeFromSourcePct?: number;
+    };
+    thesis?: OptionFlowLearningEvaluation & {
+      analysisBias?: string;
+      bullishPremium?: number;
+      bearishPremium?: number;
+    };
+    flows?: Array<{
+      contract?: string;
+      type?: string | null;
+      side?: string;
+      direction?: string;
+      time?: string | null;
+      premium?: number;
+      evaluation?: OptionFlowLearningEvaluation | null;
+    }>;
+  } | null;
+  evaluated_at?: string | null;
+  last_error?: string | null;
+  created_at?: string;
 };
 
 type PastedShot = {
@@ -151,6 +217,24 @@ const LOCALE_TAG: Record<Lang, string> = {
   en: "en-US",
   es: "es-ES",
 };
+
+function formatLearningPercent(value?: number | null) {
+  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)}%` : "—";
+}
+
+function formatMarketDateTime(value: string | null | undefined, localeTag: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(localeTag, {
+    timeZone: "America/New_York",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(date);
+}
 
 const MAX_ROWS_BASE = 400;
 const MAX_ROWS_WITH_IMAGES = 150;
@@ -176,6 +260,8 @@ const ROW_KEYWORDS = [
   "root",
   "root symbol",
   "option symbol",
+  "option_chain_id",
+  "option chain id",
   "contract",
   "expiry",
   "expiration",
@@ -246,7 +332,16 @@ const COMMON_FLOW_COLUMNS: ProviderColumnMap = {
     "ticker",
     "symbol",
   ],
-  symbol: ["symbol", "option_symbol", "option symbol", "contract", "ticker", "root"],
+  symbol: [
+    "symbol",
+    "option_chain_id",
+    "option chain id",
+    "option_symbol",
+    "option symbol",
+    "contract",
+    "ticker",
+    "root",
+  ],
   expiry: ["expiry", "expiration", "expiration date", "exp", "exp date", "date"],
   strike: ["strike", "strike price", "strk"],
   type: ["type", "option type", "call_put", "put_call", "call/put", "put/call", "cp"],
@@ -254,8 +349,8 @@ const COMMON_FLOW_COLUMNS: ProviderColumnMap = {
   size: ["size", "qty", "quantity", "volume"],
   premium: ["premium", "notional", "value", "cost", "total premium"],
   oi: ["oi", "open interest", "open_interest", "openinterest", "open int", "openint"],
-  bid: ["bid", "bid price"],
-  ask: ["ask", "ask price"],
+  bid: ["nbbo_bid", "nbbo bid", "bid", "bid price"],
+  ask: ["nbbo_ask", "nbbo ask", "ask", "ask price"],
   trade: ["trade", "trade_price", "trade price", "price", "fill", "executed"],
   time: ["time", "timestamp", "date/time", "datetime"],
 };
@@ -273,6 +368,18 @@ function isoDate(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function defaultFlowSessionDate(now = new Date()) {
+  let dateKey = marketDateKey(now);
+  const minute = marketClockMinutes(now);
+  if (minute != null && minute < 13 * 60) dateKey = addCalendarDays(dateKey, -1);
+  while (dateKey) {
+    const day = new Date(`${dateKey}T12:00:00Z`).getUTCDay();
+    if (day >= 1 && day <= 5) return dateKey;
+    dateKey = addCalendarDays(dateKey, -1);
+  }
+  return isoDate(now);
 }
 
 function makeId() {
@@ -1534,6 +1641,7 @@ export default function OptionFlowPage() {
   const [provider, setProvider] = useState<ProviderId>("optionstrat");
   const [tradeIntent, setTradeIntent] = useState<TradeIntent>("0dte");
   const [underlying, setUnderlying] = useState<string>("");
+  const [flowSessionDate, setFlowSessionDate] = useState<string>(() => defaultFlowSessionDate());
   const [analyzeAll, setAnalyzeAll] = useState<boolean>(false);
   const [previousClose, setPreviousClose] = useState<number | null>(null);
 
@@ -1552,6 +1660,7 @@ export default function OptionFlowPage() {
   const [analysisRows, setAnalysisRows] = useState<any[]>([]);
   const [chartDataUrl, setChartDataUrl] = useState<string | null>(null);
   const [archives, setArchives] = useState<OptionFlowArchive[]>([]);
+  const [learningRuns, setLearningRuns] = useState<OptionFlowLearningRun[]>([]);
   const [archiveId, setArchiveId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState<string>("");
   const [archiveFilePath, setArchiveFilePath] = useState<string | null>(null);
@@ -2848,6 +2957,34 @@ export default function OptionFlowPage() {
     setArchives((data as OptionFlowArchive[]) ?? []);
   }
 
+  async function loadLearningRuns(memoryId?: string | null) {
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) return;
+      const params = new URLSearchParams();
+      if (memoryId) params.set("memoryId", memoryId);
+      const suffix = params.size ? `?${params.toString()}` : "";
+      const response = await fetch(`/api/option-flow/learning${suffix}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !Array.isArray(body?.runs)) return;
+      const incoming = body.runs as OptionFlowLearningRun[];
+      if (memoryId) {
+        setLearningRuns((current) => {
+          const ids = new Set(incoming.map((run) => run.id));
+          return [...incoming, ...current.filter((run) => !ids.has(run.id))].slice(0, 12);
+        });
+      } else {
+        setLearningRuns(incoming);
+      }
+    } catch {
+      // Learning history is supplemental; the main analysis should remain usable.
+    }
+  }
+
 
   useEffect(() => {
     let alive = true;
@@ -2910,6 +3047,13 @@ export default function OptionFlowPage() {
     if (!userId) return;
     void cleanupArchives().then(loadArchives);
   }, [userId]);
+
+  useEffect(() => {
+    if (!userId || entitled !== true) return;
+    void loadLearningRuns();
+    const timer = window.setInterval(() => void loadLearningRuns(), 5 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [userId, entitled]);
 
   useEffect(() => {
     shotsRef.current = pastedShots;
@@ -3054,6 +3198,7 @@ export default function OptionFlowPage() {
     const hasShots = pastedShots.length > 0;
     const csvTooLarge = csvFile ? csvFile.size > MAX_CSV_BYTES : false;
     let normalizedUnderlying = underlying.trim();
+    let sourceSessionDateForAnalysis = flowSessionDate;
     const fileName = csvFile?.name.toLowerCase() ?? "";
     const isCsv = fileName.endsWith(".csv");
     const isExcel = fileName.endsWith(".xlsx");
@@ -3198,6 +3343,27 @@ export default function OptionFlowPage() {
           });
         }
 
+        const resolvedSessionDate = resolveFlowSessionDateForRows(
+          rowsForAnalysis,
+          sourceSessionDateForAnalysis
+        );
+        if (resolvedSessionDate) {
+          if (resolvedSessionDate !== sourceSessionDateForAnalysis) {
+            sourceSessionDateForAnalysis = resolvedSessionDate;
+            setFlowSessionDate(resolvedSessionDate);
+            appendMessage({
+              role: "system",
+              body: isEs
+                ? `Detecté que los flows pertenecen al ${resolvedSessionDate}; usaré esa sesión.`
+                : `I detected that the flows belong to ${resolvedSessionDate}; that session will be used.`,
+            });
+          }
+          rowsForAnalysis = rowsForAnalysis.filter((row) => {
+            const rowDate = flowRowSessionDate(row);
+            return !rowDate || rowDate === sourceSessionDateForAnalysis;
+          });
+        }
+
         if (normalizedUnderlying && rowsForAnalysis.length === 0) {
           appendMessage({
             role: "system",
@@ -3239,6 +3405,7 @@ export default function OptionFlowPage() {
           underlying: normalizedUnderlying,
           previousClose: prevClose,
           tradeIntent,
+          sourceSessionDate: sourceSessionDateForAnalysis,
           rows: compactRows,
           screenshotDataUrls,
           analystNotes: note || null,
@@ -3257,6 +3424,7 @@ export default function OptionFlowPage() {
           tradeIntent,
           previousClose: prevClose ?? null,
           createdAt: new Date().toISOString(),
+          sourceSessionDate: sourceSessionDateForAnalysis,
         },
       };
       if ((!analysisPayload.keyLevels || !analysisPayload.keyLevels.length) && analysisPayload.expirations) {
@@ -3274,6 +3442,13 @@ export default function OptionFlowPage() {
       const nextAnalysisId = body?.uploadId ?? null;
       setAnalysisId(nextAnalysisId);
       analysisIdRef.current = nextAnalysisId;
+      if (body?.learningRun?.id) {
+        const scheduledRun = body.learningRun as OptionFlowLearningRun;
+        setLearningRuns((current) => [
+          scheduledRun,
+          ...current.filter((run) => run.id !== scheduledRun.id),
+        ].slice(0, 12));
+      }
       setAnalysisData(analysisPayload);
       const formatted = buildAnalysisHtml(analysisPayload);
       setAnalysisHtml(formatted);
@@ -3841,6 +4016,22 @@ export default function OptionFlowPage() {
               className="ml-2 w-24 rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 placeholder:text-slate-600 disabled:opacity-50"
             />
           </label>
+          <label className="text-[11px] text-slate-400">
+            {isEs ? "Fecha del flow" : "Flow date"}
+            <input
+              type="date"
+              value={flowSessionDate}
+              min={addCalendarDays(marketDateKey(new Date()), -55)}
+              max={marketDateKey(new Date())}
+              onChange={(event) => setFlowSessionDate(event.target.value)}
+              className="ml-2 rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100"
+              title={
+                isEs
+                  ? "Día en que ocurrieron los flows de 1:00–4:00 PM ET"
+                  : "Session when the 1:00-4:00 PM ET flows occurred"
+              }
+            />
+          </label>
           <label className="flex items-center gap-2 text-[11px] text-slate-400">
             <input
               type="checkbox"
@@ -4072,6 +4263,162 @@ export default function OptionFlowPage() {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {learningRuns.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-emerald-500/25 bg-slate-950/60 p-4 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-300">
+                {isEs ? "Option Flow Intelligence · aprendizaje" : "Option Flow Intelligence · learning"}
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                {isEs
+                  ? "Valida automáticamente los flows de 1:00–4:00 PM ET contra la próxima sesión y aprende cuándo el underlying confirmó o contradijo la lectura."
+                  : "Automatically validates 1:00-4:00 PM ET flows against the next session and learns when the underlying confirmed or contradicted the read."}
+              </p>
+            </div>
+            <span className="rounded-full border border-slate-700 px-2.5 py-1 text-[10px] text-slate-400">
+              {isEs ? "Confirmación: movimiento de 0.25%" : "Confirmation: 0.25% move"}
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            {learningRuns.map((run) => {
+              const validation = run.market_validation;
+              const thesis = validation?.thesis;
+              const evaluatedFlows = validation?.flows ?? run.tracked_flows ?? [];
+              const verdict = thesis?.verdict;
+              const verdictLabel =
+                verdict === "supports"
+                  ? isEs ? "Confirmó" : "Confirmed"
+                  : verdict === "partially_supports"
+                    ? isEs ? "Confirmó y revirtió" : "Confirmed then reversed"
+                    : verdict === "does_not_support"
+                      ? isEs ? "No confirmó" : "Did not confirm"
+                      : isEs ? "Data insuficiente" : "Insufficient data";
+              const statusLabel =
+                run.status === "completed"
+                  ? isEs ? "Validado" : "Validated"
+                  : run.status === "failed"
+                    ? isEs ? "Falló" : "Failed"
+                    : isEs ? "Programado" : "Scheduled";
+              return (
+                <div key={run.id} className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-100">
+                        {run.underlying} · {run.source_session_date} → {run.target_session_date}
+                      </p>
+                      <p className="mt-1 text-[10.5px] text-slate-500">
+                        {run.status === "completed"
+                          ? `${isEs ? "Evaluado" : "Evaluated"}: ${formatMarketDateTime(run.evaluated_at, localeTag)}`
+                          : `${isEs ? "Evaluación automática" : "Automatic evaluation"}: ${formatMarketDateTime(run.evaluation_due_at, localeTag)}`}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-[10px] ${
+                        run.status === "completed"
+                          ? "border-emerald-400/50 bg-emerald-500/10 text-emerald-200"
+                          : run.status === "failed"
+                            ? "border-rose-400/50 bg-rose-500/10 text-rose-200"
+                            : "border-amber-400/40 bg-amber-500/10 text-amber-200"
+                      }`}
+                    >
+                      {statusLabel}
+                    </span>
+                  </div>
+
+                  {run.status === "completed" && thesis ? (
+                    <>
+                      <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                        <div className="rounded-xl border border-slate-800 p-2">
+                          <p className="text-[9px] uppercase tracking-wider text-slate-500">
+                            {isEs ? "Veredicto" : "Verdict"}
+                          </p>
+                          <p className="mt-1 text-[11px] font-semibold text-emerald-200">{verdictLabel}</p>
+                        </div>
+                        <div className="rounded-xl border border-slate-800 p-2">
+                          <p className="text-[9px] uppercase tracking-wider text-slate-500">
+                            {isEs ? "Primera confirmación" : "First confirmation"}
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-200">
+                            {formatMarketDateTime(thesis.firstConfirmedAt, localeTag)}
+                            {thesis.minutesFromOpen != null
+                              ? ` · ${thesis.minutesFromOpen} ${isEs ? "min desde apertura" : "min from open"}`
+                              : ""}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-slate-800 p-2">
+                          <p className="text-[9px] uppercase tracking-wider text-slate-500">
+                            {isEs ? "Máx. a favor / contra" : "Max favorable / adverse"}
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-200">
+                            <span className="text-emerald-300">+{formatLearningPercent(thesis.maxFavorablePct)}</span>
+                            {" / "}
+                            <span className="text-rose-300">-{formatLearningPercent(thesis.maxAdversePct)}</span>
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-slate-800 p-2">
+                          <p className="text-[9px] uppercase tracking-wider text-slate-500">
+                            {isEs ? "Cierre vs. referencia" : "Close vs. reference"}
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-200">
+                            {formatLearningPercent(validation?.targetSession?.closeFromSourcePct)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {evaluatedFlows.some((flow) => flow.evaluation) && (
+                        <div className="mt-3 space-y-1.5">
+                          <p className="text-[9px] uppercase tracking-[0.2em] text-slate-500">
+                            {isEs ? "Respuesta por transacción" : "Response by transaction"}
+                          </p>
+                          {evaluatedFlows
+                            .filter((flow) => flow.evaluation)
+                            .slice(0, 6)
+                            .map((flow, index) => (
+                              <div
+                                key={`${flow.contract ?? "flow"}-${index}`}
+                                className="grid gap-1 rounded-xl border border-slate-800/80 px-2.5 py-2 text-[10.5px] text-slate-300 sm:grid-cols-[1.25fr_0.7fr_1fr]"
+                              >
+                                <span className="font-medium text-slate-100">
+                                  {flow.contract || `${flow.type ?? ""} ${flow.side ?? ""}`}
+                                  {flow.time ? ` · ${flow.time}` : ""}
+                                </span>
+                                <span>{flow.direction === "bullish" ? (isEs ? "Alcista" : "Bullish") : (isEs ? "Bajista" : "Bearish")}</span>
+                                <span>
+                                  {flow.evaluation?.firstConfirmedAt
+                                    ? `${isEs ? "Confirmó" : "Confirmed"} ${formatMarketDateTime(flow.evaluation.firstConfirmedAt, localeTag)}`
+                                    : isEs ? "No tocó +0.25% a favor" : "Did not reach +0.25% favorable"}
+                                </span>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </>
+                  ) : run.status === "failed" ? (
+                    <p className="mt-3 text-[11px] text-rose-200">
+                      {run.last_error || (isEs ? "No se pudo completar la validación." : "Validation could not be completed.")}
+                    </p>
+                  ) : (
+                    <p className="mt-3 text-[11px] text-slate-400">
+                      {isEs
+                        ? `${run.tracked_flows?.length ?? 0} flows con hora dentro de la ventana quedaron guardados para comparar al cierre de la próxima sesión.`
+                        : `${run.tracked_flows?.length ?? 0} timestamped flows in the window were saved for comparison after the next session closes.`}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <p className="text-[10px] leading-relaxed text-slate-500">
+            {isEs
+              ? "La validación mide el movimiento del underlying, no el P/L del contrato. ASK/BID indica el agresor, pero no prueba apertura o cierre. Para medir depreciación real hacen falta precios históricos de la opción, IV, spread y fills."
+              : "Validation measures the underlying move, not contract P/L. ASK/BID identifies the aggressor but does not prove opening or closing. Actual option decay requires historical option prices, IV, spread, and fills."}
+          </p>
         </div>
       )}
 

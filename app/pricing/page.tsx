@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import {
+  CHECKOUT_DISCLOSURE_VERSION,
   CURRENT_PRIVACY_VERSION,
   CURRENT_TERMS_VERSION,
   FREE_TRIAL_DAYS,
@@ -41,7 +42,11 @@ export default function PricingPage() {
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
   const [partnerCode, setPartnerCode] = useState("");
   const [promoCode, setPromoCode] = useState("");
-  const [checkoutLegalAccepted, setCheckoutLegalAccepted] = useState(false);
+  const [checkoutTermsAccepted, setCheckoutTermsAccepted] = useState(false);
+  const [checkoutPrivacyAccepted, setCheckoutPrivacyAccepted] = useState(false);
+  const [checkoutDisclosureAccepted, setCheckoutDisclosureAccepted] = useState(false);
+  const checkoutLegalAccepted =
+    checkoutTermsAccepted && checkoutPrivacyAccepted && checkoutDisclosureAccepted;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -139,6 +144,10 @@ export default function PricingPage() {
           legalAccepted: true,
           termsVersion: CURRENT_TERMS_VERSION,
           privacyVersion: CURRENT_PRIVACY_VERSION,
+          termsReadAccepted: true,
+          privacyReadAccepted: true,
+          checkoutDisclosureAccepted: true,
+          disclosureVersion: CHECKOUT_DISCLOSURE_VERSION,
         }),
       });
 
@@ -266,28 +275,60 @@ export default function PricingPage() {
         </div>
 
         {user ? (
-          <label className="w-full max-w-5xl mb-5 flex items-start gap-3 rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-[10px] leading-relaxed text-slate-300">
-            <input
-              type="checkbox"
-              checked={checkoutLegalAccepted}
-              onChange={(event) => setCheckoutLegalAccepted(event.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
-              required
-            />
-            <span>
-              {L(
-                `I accept the current Terms & Conditions and Privacy Policy. I understand the ${FREE_TRIAL_DAYS}-day trial, automatic renewal, prepaid no-refund policy, educational-only use, and no-guaranteed-results disclosure.`,
-                `Acepto los Términos y Condiciones y la Política de Privacidad vigentes. Entiendo el trial de ${FREE_TRIAL_DAYS} días, la renovación automática, la política prepago sin reembolso, el uso educativo y la divulgación de resultados no garantizados.`
-              )}{" "}
-              <Link href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
-                {L("Terms", "Términos")}
-              </Link>
-              {" / "}
-              <Link href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
-                {L("Privacy", "Privacidad")}
-              </Link>
-            </span>
-          </label>
+          <div className="w-full max-w-5xl mb-5 rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-[10px] leading-relaxed text-slate-300">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+              {L("Required subscription agreements", "Acuerdos requeridos de suscripción")}
+            </p>
+            <div className="space-y-2.5">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={checkoutTermsAccepted}
+                  onChange={(event) => setCheckoutTermsAccepted(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L("I have read and accept the current ", "He leído y acepto los ")}
+                  <Link href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                    {L("Terms & Conditions", "Términos y Condiciones")}
+                  </Link>
+                  {L(".", " vigentes.")}
+                </span>
+              </label>
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={checkoutPrivacyAccepted}
+                  onChange={(event) => setCheckoutPrivacyAccepted(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L("I have read and accept the current ", "He leído y acepto la ")}
+                  <Link href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                    {L("Privacy Policy", "Política de Privacidad")}
+                  </Link>
+                  {L(".", " vigente.")}
+                </span>
+              </label>
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={checkoutDisclosureAccepted}
+                  onChange={(event) => setCheckoutDisclosureAccepted(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L(
+                    `I understand the ${FREE_TRIAL_DAYS}-day trial, automatic renewal, prepaid no-refund policy, educational-only use, and no-guaranteed-results disclosure.`,
+                    `Entiendo el trial de ${FREE_TRIAL_DAYS} días, la renovación automática, la política prepago sin reembolso, el uso educativo y la divulgación de resultados no garantizados.`
+                  )}
+                </span>
+              </label>
+            </div>
+          </div>
         ) : null}
 
         {/* Error message (if any) */}
@@ -560,8 +601,8 @@ export default function PricingPage() {
               </h2>
               <p className="text-[10px] md:text-xs text-slate-400">
                 {L(
-                  "New programs, community features, and broker automation are in motion.",
-                  "Nuevos programas, comunidad y automatización con brokers están en camino."
+                  "New business programs and broker automation are in motion.",
+                  "Nuevos programas empresariales y automatización con brokers están en camino."
                 )}
               </p>
             </div>
@@ -578,24 +619,6 @@ export default function PricingPage() {
                   {L(
                     "Articles and playbooks focused on Trader Entrepreneur execution, risk, and operating structure.",
                     "Artículos y playbooks enfocados en ejecución, riesgo y estructura operativa para Empresarios Traders."
-                  )}
-                </p>
-                <span className="mt-3 inline-flex rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">
-                  {L("Coming soon", "Próximamente")}
-                </span>
-              </div>
-
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/90 p-5">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-400">
-                  {L("Neuro Clubs", "Neuro Clubs")}
-                </div>
-                <h3 className="text-sm font-semibold mt-1">
-                  {L("Shared business benchmarks", "Benchmarks empresariales compartidos")}
-                </h3>
-                <p className="text-[10px] text-slate-300 mt-2">
-                  {L(
-                    "Communities can share execution stats and compare process quality without exposing private P&L.",
-                    "Comunidades podrán compartir estadísticas de ejecución y comparar calidad de proceso sin exponer P&L privado."
                   )}
                 </p>
                 <span className="mt-3 inline-flex rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">

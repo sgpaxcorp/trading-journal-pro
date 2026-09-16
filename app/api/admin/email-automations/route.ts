@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { requireAdminActionSecret, requireAdminUser } from "@/lib/adminAuth";
 import { recordAdminAuditEvent } from "@/lib/adminAudit";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
@@ -23,6 +23,8 @@ import {
   type AutomatedEmailKey,
   type AdminBroadcastTemplateKey,
 } from "@/lib/email";
+import { requireRuntimeControl } from "@/lib/runtimeControls";
+import { processEmailDeliveryBatch } from "@/lib/emailDeliveryWorker";
 
 export const maxDuration = 300;
 
@@ -70,6 +72,9 @@ export async function POST(req: NextRequest) {
   try {
     const admin = await requireAdminUser(req, { action: "email-automations:write", limit: 20, windowMs: 10 * 60_000 });
     if (!admin.ok) return admin.response;
+
+    const runtimeGate = await requireRuntimeControl("email_delivery");
+    if (runtimeGate) return runtimeGate;
 
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action ?? "test_automation");
@@ -120,6 +125,11 @@ export async function POST(req: NextRequest) {
       }
 
       const result = await dispatchWaitlistLaunch({ mode: isRetry ? "failed" : "pending" });
+      after(async () => {
+        await processEmailDeliveryBatch(25).catch((error) => {
+          console.error("[admin/email-automations] background email worker error:", error);
+        });
+      });
       await recordAdminAuditEvent({
         req,
         adminUserId: admin.user.id,

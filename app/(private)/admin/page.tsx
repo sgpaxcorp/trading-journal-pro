@@ -8,6 +8,8 @@ import AdminEmailAutomations from "@/app/(private)/admin/AdminEmailAutomations";
 import AdminSupportInbox from "@/app/(private)/admin/AdminSupportInbox";
 import AdminUsersManager from "@/app/(private)/admin/AdminUsersManager";
 import AiCostControlPanel from "@/app/(private)/admin/AiCostControlPanel";
+import EmergencyPortfolioControlPanel from "@/app/(private)/admin/EmergencyPortfolioControlPanel";
+import OperationalControlPanel from "@/app/(private)/admin/OperationalControlPanel";
 import { useAuth } from "@/context/AuthContext";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -40,7 +42,7 @@ type Metrics = {
   conversionRate: number;
 };
 
-type AdminTab = "overview" | "growth" | "usage" | "ai-costs" | "emails" | "users" | "inbox";
+type AdminTab = "overview" | "growth" | "usage" | "operations" | "ai-costs" | "emails" | "users" | "inbox";
 type UsersSubview = "directory" | "access";
 
 function Sparkline({
@@ -318,6 +320,11 @@ export default function AdminDashboardPage() {
         description: L("Sessions, events, and top pages.", "Sesiones, eventos y páginas más usadas."),
       },
       {
+        key: "operations" as const,
+        label: L("Operations", "Operaciones"),
+        description: L("Service controls, queues, and production health.", "Servicios, colas y salud de producción."),
+      },
+      {
         key: "ai-costs" as const,
         label: L("AI Costs", "Costos IA"),
         description: L("OpenAI invoice, tokens, and unit economics.", "Factura OpenAI, tokens y economía por usuario."),
@@ -416,7 +423,7 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+          <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
             {adminTabs.map((tab) => (
               <TabButton
                 key={tab.key}
@@ -696,6 +703,22 @@ export default function AdminDashboardPage() {
         )}
 
         {activeTab === "ai-costs" && <AiCostControlPanel lang={lang} />}
+
+        {activeTab === "operations" && (
+          <SectionShell
+            eyebrow={L("Production control", "Control de producción")}
+            title={L("Operational safety", "Seguridad operativa")}
+            description={L(
+              "Monitor asynchronous work and pause individual services during an incident.",
+              "Monitorea los procesos asíncronos y pausa servicios individuales durante un incidente."
+            )}
+          >
+            <div className="space-y-8">
+              <EmergencyPortfolioControlPanel lang={lang} />
+              <OperationalControlPanel lang={lang} />
+            </div>
+          </SectionShell>
+        )}
 
         {activeTab === "emails" && (
           <div className="space-y-6">

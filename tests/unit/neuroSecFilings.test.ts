@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildRecentSecCompanyDocuments,
+  buildRecentSecMaterialDocuments,
   sanitizeSecAccessionNumber,
   sanitizeSecTicker,
 } from "@/lib/neuroSecFilings";
@@ -45,6 +46,37 @@ describe("neuro SEC filings", () => {
       periodEnd: "2026-06-30",
       documentUrl:
         "https://www.sec.gov/Archives/edgar/data/320193/000032019326000002/quarter.htm",
+    });
+  });
+
+  it("builds a material daily-office filing feed without accepting arbitrary forms", () => {
+    const documents = buildRecentSecMaterialDocuments({
+      ticker: "AAPL",
+      company: { cik_str: 320193, title: "Apple Inc." },
+      submissions: {
+        filings: {
+          recent: {
+            form: ["8-K", "DEF 14A", "UPLOAD", "S-3"],
+            accessionNumber: [
+              "0000320193-26-000010",
+              "0000320193-26-000011",
+              "0000320193-26-000012",
+              "0000320193-26-000013",
+            ],
+            primaryDocument: ["event.htm", "proxy.htm", "letter.htm", "s3.htm"],
+            primaryDocDescription: ["Material event", "Proxy statement", "SEC correspondence", "Shelf registration"],
+            filingDate: ["2026-09-16", "2026-09-15", "2026-09-14", "2026-09-13"],
+            reportDate: ["2026-09-16", "2026-09-15", "", ""],
+          },
+        },
+      },
+    });
+
+    expect(documents.map((document) => document.form)).toEqual(["8-K", "DEF 14A", "S-3"]);
+    expect(documents[0]).toMatchObject({
+      description: "Material event",
+      filingDate: "2026-09-16",
+      documentUrl: "https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/event.htm",
     });
   });
 });

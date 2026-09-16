@@ -644,15 +644,6 @@ const smartTools: NavItem[] = [
   },
 ];
 
-const forum: NavItem[] = [
-  {
-    id: "community-feed",
-    titleKey: "nav.forum.community.title",
-    descriptionKey: "nav.forum.community.desc",
-    href: "/forum/community-feed",
-  },
-];
-
 /* ========== TopNav ========== */
 
 export default function TopNav() {
@@ -762,13 +753,6 @@ export default function TopNav() {
                 lang={lang}
                 dataTour="nav-rules"
               />
-              <Dropdown
-                titleKey="nav.forum"
-                items={forum}
-                theme={theme}
-                lang={lang}
-                dataTour="nav-forum"
-              />
             </div>
           </div>
 
@@ -823,7 +807,6 @@ export default function TopNav() {
                 />
               ) : null}
               <Dropdown titleKey="nav.rules" items={rules} theme={theme} lang={lang} dataTour="nav-rules" />
-              <Dropdown titleKey="nav.forum" items={forum} theme={theme} lang={lang} dataTour="nav-forum" />
             </div>
           </div>
         ) : null}

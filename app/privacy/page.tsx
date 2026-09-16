@@ -57,7 +57,6 @@ const CONTENT = {
           "Integrations You Enable: with third-party platforms when you choose to connect them (data flows may occur between NTJ and the third party based on your authorization).",
           "Legal and Safety: to comply with law, court orders, or requests by public authorities, or to protect the rights, safety, and security of NTJ, our users, or others.",
           "Business Transfers: in connection with a merger, acquisition, financing, reorganization, bankruptcy, or sale of assets (subject to applicable law).",
-          "Public Sharing Features (Optional): if you choose to share trades, summaries, or other content publicly, that content may be visible to others based on your settings.",
         ],
       },
       {
@@ -258,8 +257,8 @@ export default function PrivacyPolicyPage() {
             </h1>
             <p className="text-sm text-slate-400 mt-2">
               {isEs
-                ? "Última actualización: 10 de septiembre de 2026."
-                : "Last updated: September 10, 2026."}
+                ? "Última actualización: 15 de septiembre de 2026."
+                : "Last updated: September 15, 2026."}
             </p>
           </div>
 

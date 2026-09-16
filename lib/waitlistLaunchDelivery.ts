@@ -1,5 +1,6 @@
 import "server-only";
 
+import { enqueueEmailDeliveryJob } from "@/lib/emailDeliveryJobs";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { WAITLIST_CAMPAIGN } from "@/lib/waitlistCampaign";
 import {
@@ -83,7 +84,7 @@ async function claimChannel(rowId: string, channel: LaunchChannel, mode: Dispatc
     .from("launch_waitlist")
     .update({ [columns.status]: "processing", [columns.error]: null })
     .eq("id", rowId)
-    .eq(columns.status, expected)
+    .in(columns.status, [expected, "processing"])
     .select("id")
     .maybeSingle();
 
@@ -274,6 +275,82 @@ export async function getWaitlistLaunchOverview() {
   };
 }
 
+export async function processWaitlistLaunchChannelJob(input: unknown) {
+  const payload = (input ?? {}) as { rowId?: string; channel?: string; mode?: string };
+  const rowId = String(payload.rowId ?? "").trim();
+  const channel = String(payload.channel ?? "") as LaunchChannel;
+  const requestedMode = payload.mode === "failed" ? "failed" : "pending";
+  if (!rowId || !Object.prototype.hasOwnProperty.call(CHANNEL_COLUMNS, channel)) {
+    throw new Error("Invalid waitlist delivery payload.");
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("launch_waitlist")
+    .select(
+      "id, position, name, email, email_normalized, linked_user_id, launch_discount_email_status, launch_discount_push_status, launch_discount_inapp_status"
+    )
+    .eq("id", rowId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return { skipped: true, reason: "waitlist_row_missing" };
+
+  const row = data as WaitlistDeliveryRow;
+  const currentStatus = String(row[CHANNEL_COLUMNS[channel].status] ?? "");
+  if (currentStatus === "sent" || currentStatus === "unavailable") {
+    return { skipped: true, reason: currentStatus };
+  }
+
+  const mode: DispatchMode = currentStatus === "failed" ? "failed" : requestedMode;
+  if (!(await claimChannel(row.id, channel, mode))) {
+    return { skipped: true, reason: "not_claimed" };
+  }
+
+  try {
+    if (channel === "email") {
+      await sendWaitlistLaunchDiscountEmail({
+        email: row.email,
+        name: row.name,
+        position: row.position,
+      });
+      await setChannelStatus(row.id, channel, "sent");
+      return { sent: true, channel };
+    }
+
+    const linkedUserId = await resolveLinkedUser(row);
+    if (!linkedUserId) {
+      await setChannelStatus(
+        row.id,
+        channel,
+        "unavailable",
+        "No platform account is linked to this waitlist email."
+      );
+      return { unavailable: true, channel };
+    }
+
+    if (channel === "inapp") {
+      await createPlatformMessage(row, linkedUserId);
+      await setChannelStatus(row.id, channel, "sent");
+      return { sent: true, channel };
+    }
+
+    const pushResult = await sendMobilePush(linkedUserId);
+    if (!pushResult.available) {
+      await setChannelStatus(
+        row.id,
+        channel,
+        "unavailable",
+        "No registered mobile device has marketing notifications enabled."
+      );
+      return { unavailable: true, channel };
+    }
+    await setChannelStatus(row.id, channel, "sent");
+    return { sent: pushResult.sent, channel };
+  } catch (deliveryError) {
+    await setChannelStatus(row.id, channel, "failed", errorMessage(deliveryError));
+    throw deliveryError;
+  }
+}
+
 export async function dispatchWaitlistLaunch(args: {
   mode: DispatchMode;
   limit?: number;
@@ -304,78 +381,28 @@ export async function dispatchWaitlistLaunch(args: {
   const rows = (data ?? []) as WaitlistDeliveryRow[];
   const result = {
     selected: rows.length,
-    emailSent: 0,
-    pushSent: 0,
-    inappSent: 0,
-    failed: 0,
-    unavailable: 0,
+    jobsQueued: 0,
+    alreadyQueued: 0,
   };
 
-  async function deliverRow(row: WaitlistDeliveryRow) {
-    if (await claimChannel(row.id, "email", args.mode)) {
-      try {
-        await sendWaitlistLaunchDiscountEmail({
-          email: row.email,
-          name: row.name,
-          position: row.position,
-        });
-        await setChannelStatus(row.id, "email", "sent");
-        result.emailSent += 1;
-      } catch (deliveryError) {
-        await setChannelStatus(row.id, "email", "failed", errorMessage(deliveryError));
-        result.failed += 1;
-      }
+  for (const row of rows) {
+    for (const channel of ["email", "inapp", "push"] as LaunchChannel[]) {
+      if (String(row[CHANNEL_COLUMNS[channel].status]) !== expectedStatus) continue;
+      const dedupeKey = [
+        "waitlist-launch",
+        WAITLIST_CAMPAIGN.launchDateIso,
+        row.id,
+        channel,
+        args.mode,
+      ].join(":");
+      const job = await enqueueEmailDeliveryJob({
+        kind: "waitlist_launch_channel",
+        dedupeKey,
+        payload: { rowId: row.id, channel, mode: args.mode },
+      });
+      if (job?.status === "queued") result.jobsQueued += 1;
+      else result.alreadyQueued += 1;
     }
-
-    let linkedUserId: string | null = null;
-    try {
-      linkedUserId = await resolveLinkedUser(row);
-    } catch (linkError) {
-      linkedUserId = null;
-      console.error("[waitlist-launch] account lookup failed", row.email, linkError);
-    }
-
-    if (await claimChannel(row.id, "inapp", args.mode)) {
-      if (!linkedUserId) {
-        await setChannelStatus(row.id, "inapp", "unavailable", "No platform account is linked to this waitlist email.");
-        result.unavailable += 1;
-      } else {
-        try {
-          await createPlatformMessage(row, linkedUserId);
-          await setChannelStatus(row.id, "inapp", "sent");
-          result.inappSent += 1;
-        } catch (deliveryError) {
-          await setChannelStatus(row.id, "inapp", "failed", errorMessage(deliveryError));
-          result.failed += 1;
-        }
-      }
-    }
-
-    if (await claimChannel(row.id, "push", args.mode)) {
-      if (!linkedUserId) {
-        await setChannelStatus(row.id, "push", "unavailable", "No platform account is linked to this waitlist email.");
-        result.unavailable += 1;
-      } else {
-        try {
-          const pushResult = await sendMobilePush(linkedUserId);
-          if (!pushResult.available) {
-            await setChannelStatus(row.id, "push", "unavailable", "No registered mobile device has marketing notifications enabled.");
-            result.unavailable += 1;
-          } else {
-            await setChannelStatus(row.id, "push", "sent");
-            result.pushSent += pushResult.sent;
-          }
-        } catch (deliveryError) {
-          await setChannelStatus(row.id, "push", "failed", errorMessage(deliveryError));
-          result.failed += 1;
-        }
-      }
-    }
-  }
-
-  const concurrency = 8;
-  for (let index = 0; index < rows.length; index += concurrency) {
-    await Promise.all(rows.slice(index, index + concurrency).map(deliverRow));
   }
 
   return result;

@@ -29,8 +29,32 @@
       "schedule": "0 15 * * *"
     },
     {
+      "path": "/api/option-flow/evaluate-learning",
+      "schedule": "*/15 21-23 * * 1-5"
+    },
+    {
       "path": "/api/waitlist/send-launch-discounts",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/neuro-analysis/jobs/process",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/neuro-analysis/investment-data/schedule",
+      "schedule": "0 11 * * 1-5"
+    },
+    {
+      "path": "/api/neuro-analysis/daily-office/schedule",
+      "schedule": "0 13 * * 1-5"
+    },
+    {
+      "path": "/api/email-jobs/process",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/operations/watchdog",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

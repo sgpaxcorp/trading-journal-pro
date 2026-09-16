@@ -54,7 +54,20 @@ export type NeuroExternalProviderSnapshot = {
   } | null;
   priceHistory?: NeuroExternalPriceRow[];
   macro?: {
-    fred?: Record<string, { value: number | null; date?: string | null }> | null;
+    fred?: Record<
+      string,
+      {
+        value: number | null;
+        date?: string | null;
+        previousValue?: number | null;
+        previousDate?: string | null;
+        yearAgoValue?: number | null;
+        yearAgoDate?: string | null;
+        change?: number | null;
+        changePct?: number | null;
+        yoyPct?: number | null;
+      }
+    > | null;
     bls?: Record<string, { value: number | null; period?: string | null; year?: string | null }> | null;
     bea?: { latestGdp?: number | null; period?: string | null; year?: string | null } | null;
     treasury?: { averageInterestRate?: number | null; recordDate?: string | null } | null;
@@ -200,10 +213,10 @@ async function fetchAlphaVantage(ticker: string) {
   const quoteRow = quote?.["Global Quote"] ?? {};
   const series = monthly?.["Monthly Adjusted Time Series"] ?? {};
   const priceHistory = normalizeMonthlyRows(
-    Object.entries(series).map(([date, row]: [string, any]) => ({
-      date,
-      close: rawNumber(row?.["5. adjusted close"] ?? row?.["4. close"]) ?? 0,
-    }))
+    Object.entries(series).flatMap(([date, row]: [string, any]) => {
+      const close = rawNumber(row?.["5. adjusted close"] ?? row?.["4. close"]);
+      return close == null ? [] : [{ date, close }];
+    })
   );
   const etfHoldings = Array.isArray(etfProfile?.holdings)
     ? etfProfile.holdings.slice(0, 20).map((holding: any) => ({
@@ -261,10 +274,10 @@ async function fetchTwelveData(ticker: string) {
   if (error) throw new Error(String(error));
 
   const priceHistory = normalizeMonthlyRows(
-    (Array.isArray(timeSeries?.values) ? timeSeries.values : []).map((row: any) => ({
-      date: String(row.datetime ?? ""),
-      close: rawNumber(row.close) ?? 0,
-    }))
+    (Array.isArray(timeSeries?.values) ? timeSeries.values : []).flatMap((row: any) => {
+      const close = rawNumber(row.close);
+      return close == null ? [] : [{ date: String(row.datetime ?? ""), close }];
+    })
   );
 
   return {
@@ -303,10 +316,10 @@ async function fetchFmp(ticker: string) {
   if (!quoteRow && !profileRow && !history?.historical) throw new Error(quote?.error || profile?.error || "FMP returned no usable data.");
 
   const priceHistory = normalizeMonthlyRows(
-    (Array.isArray(history?.historical) ? history.historical : []).map((row: any) => ({
-      date: String(row.date ?? ""),
-      close: rawNumber(row.close) ?? 0,
-    }))
+    (Array.isArray(history?.historical) ? history.historical : []).flatMap((row: any) => {
+      const close = rawNumber(row.close);
+      return close == null ? [] : [{ date: String(row.date ?? ""), close }];
+    })
   );
   const topHoldings = Array.isArray(etfHoldings)
     ? etfHoldings.slice(0, 20).map((holding: any) => ({
@@ -357,18 +370,69 @@ async function fetchFmp(ticker: string) {
 async function fetchFredMacro() {
   const key = envValue("FRED_API_KEY");
   if (!key) return { status: status("fred", false, false, "Missing FRED_API_KEY"), data: null };
-  const series = ["DGS10", "DGS2", "FEDFUNDS", "CPIAUCSL", "UNRATE"];
-  const entries = await Promise.all(
-    series.map(async (seriesId) => {
+  const series = [
+    { id: "DGS10", limit: 2 },
+    { id: "DGS2", limit: 2 },
+    { id: "FEDFUNDS", limit: 2 },
+    { id: "CPIAUCSL", limit: 13 },
+    { id: "UNRATE", limit: 2 },
+    { id: "PAYEMS", limit: 2 },
+    { id: "A191RL1Q225SBEA", limit: 2 },
+    { id: "BAMLH0A0HYM2", limit: 2 },
+    { id: "DTWEXBGS", limit: 2 },
+    { id: "DCOILWTICO", limit: 2 },
+    { id: "PALLFNFINDEXQ", limit: 2 },
+    { id: "PCOPPUSDM", limit: 2 },
+  ];
+  const results = await Promise.allSettled(
+    series.map(async ({ id: seriesId, limit }) => {
       const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${encodeURIComponent(
         key
-      )}&file_type=json&sort_order=desc&limit=1`;
+      )}&file_type=json&sort_order=desc&limit=${limit}`;
       const json = await fetchProviderJson(url);
-      const latest = Array.isArray(json?.observations) ? json.observations[0] : null;
-      return [seriesId, { value: rawNumber(latest?.value), date: latest?.date ?? null }] as const;
+      const observations = (Array.isArray(json?.observations) ? json.observations : [])
+        .map((row: any) => ({ value: rawNumber(row?.value), date: row?.date ?? null }))
+        .filter((row: { value: number | null }) => row.value != null);
+      const latest = observations[0] ?? null;
+      const previous = observations[1] ?? null;
+      const yearAgo = seriesId === "CPIAUCSL" ? observations[12] ?? null : null;
+      const change = latest?.value != null && previous?.value != null ? latest.value - previous.value : null;
+      const changePct =
+        change != null && previous?.value != null && previous.value !== 0
+          ? (change / Math.abs(previous.value)) * 100
+          : null;
+      const yoyPct =
+        latest?.value != null && yearAgo?.value != null && yearAgo.value !== 0
+          ? ((latest.value / yearAgo.value) - 1) * 100
+          : null;
+      return [
+        seriesId,
+        {
+          value: latest?.value ?? null,
+          date: latest?.date ?? null,
+          previousValue: previous?.value ?? null,
+          previousDate: previous?.date ?? null,
+          yearAgoValue: yearAgo?.value ?? null,
+          yearAgoDate: yearAgo?.date ?? null,
+          change,
+          changePct,
+          yoyPct,
+        },
+      ] as const;
     })
   );
-  return { status: status("fred", true, true), data: Object.fromEntries(entries) };
+  const entries = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+  const failedSeries = results.length - entries.length;
+  if (!entries.length) throw new Error("Official macroeconomic series were unavailable.");
+  return {
+    status: status(
+      "fred",
+      true,
+      true,
+      failedSeries ? `${failedSeries} macroeconomic series unavailable; remaining series loaded.` : null
+    ),
+    data: Object.fromEntries(entries),
+  };
 }
 
 async function fetchBlsMacro() {

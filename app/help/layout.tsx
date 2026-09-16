@@ -10,6 +10,7 @@ const NAV_GROUPS = (lang: "en" | "es") => {
       title: isEs ? "Primeros pasos" : "Get started",
       items: [
         { href: "/help", label: isEs ? "Resumen" : "Overview" },
+        { href: "/help/complete-manual", label: isEs ? "Manual completo" : "Complete manual" },
         { href: "/help/getting-started", label: isEs ? "Guia de inicio" : "Getting Started" },
         { href: "/help/assistant", label: isEs ? "Guía Neuro" : "Neuro Guide" },
         { href: "/help/growth-plan", label: isEs ? "Plan de Empresa de Trading" : "Trading Business Plan" },
@@ -37,6 +38,7 @@ const NAV_GROUPS = (lang: "en" | "es") => {
         { href: "/help/data-inputs", label: isEs ? "Datos e importaciones" : "Data Inputs & Imports" },
         { href: "/help/profit-loss-track", label: "Profit & Loss Track" },
         { href: "/help/option-flow", label: "Option Flows Analysis" },
+        { href: "/help/neuro-analysis", label: "Neuro Analysis" },
         { href: "/help/reports", label: isEs ? "Reportes de Option Flows Analysis" : "Option Flows Analysis Reports" },
         { href: "/help/post-mortem", label: isEs ? "Post‑mortem" : "Post‑mortem" },
       ],
@@ -46,12 +48,6 @@ const NAV_GROUPS = (lang: "en" | "es") => {
       items: [
         { href: "/help/settings", label: isEs ? "Idioma y ajustes" : "Language & Settings" },
         { href: "/help/billing", label: isEs ? "Billing y planes" : "Billing & Plans" },
-      ],
-    },
-    {
-      title: isEs ? "Comunidad" : "Community",
-      items: [
-        { href: "/help/forum", label: isEs ? "Comunidad" : "Community Forum" },
       ],
     },
   ];

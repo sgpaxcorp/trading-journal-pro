@@ -13,6 +13,7 @@ Neuro Trader Journal es un sistema de performance. El ciclo base es: **plan → 
 - El mobile app es la app complementaria para usuarios existentes: iniciar sesion, revisar pantallas clave, journalear en movimiento y recibir recordatorios.
 
 ## Cómo usar esta guía
+- Abre **Manual completo** cuando quieras la explicación completa de cada módulo: qué es, para qué sirve, cómo llegar, cómo usarlo y cómo se ve un buen uso.
 - Empieza con Getting Started si eres nuevo.
 - Usa Growth Plan y Journal como tu sistema diario.
 - Usa Dashboard y Analítica para validar disciplina y rendimiento.
@@ -47,6 +48,9 @@ Trae trades reales al sistema. Sin datos limpios, la analítica se distorsiona.
 
 **Option Flows Analysis (beta privada)**
 Espacio en beta privada para probar reportes de flujo y planes premarket antes del lanzamiento público.
+
+**Neuro Analysis (portal privado de inversión)**
+Smart Tool privado para investigación de acciones y ETFs a largo plazo, perfiles de compañías, filings públicos, seguimiento de tesis, revisión de portfolio, escenarios de dividendos/compounding e investigación con IA basada en evidencia.
 
 **Notebook**  
 Tu playbook: reglas, patrones y lecciones que quieres repetir.

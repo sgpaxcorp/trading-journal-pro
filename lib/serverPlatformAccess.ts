@@ -6,9 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import { hasAnyRecognizedAccessGrant } from "@/lib/accessGrants";
 import {
   isActiveEntitlementStatus,
-  isActiveProfileStatus,
   PLATFORM_ACCESS_ENTITLEMENT,
-  shouldAllowLocalProfileAccessFallback,
 } from "@/lib/accessControl";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
@@ -99,23 +97,7 @@ export async function loadPlatformAccessForUser(user: User): Promise<Omit<Platfo
       .eq("user_id", userId),
   ]);
 
-  let emailMatchedProfile: ProfileRow | null = null;
-  const allowLocalFallback = shouldAllowLocalProfileAccessFallback();
-
-  if (!profile && allowLocalFallback && user.email) {
-      const { data: emailProfiles } = await supabaseAdmin
-        .from("profiles")
-        .select(
-          "id, subscription_status, onboarding_completed, plan, email, legal_terms_version, legal_privacy_version, legal_accepted_at"
-        )
-      .ilike("email", user.email)
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    emailMatchedProfile = Array.isArray(emailProfiles) ? ((emailProfiles[0] as ProfileRow | undefined) ?? null) : null;
-  }
-
-  const effectiveProfile = ((profile as ProfileRow | null) ?? emailMatchedProfile) || null;
+  const effectiveProfile = (profile as ProfileRow | null) ?? null;
   const entitlementRows = Array.isArray(entitlements) ? (entitlements as EntitlementRow[]) : [];
   const hasPlatformAccess = entitlementRows.some(
     (row) =>
@@ -123,10 +105,7 @@ export async function loadPlatformAccessForUser(user: User): Promise<Omit<Platfo
       isActiveEntitlementStatus(row?.status)
   );
   const hasScopedAccess = hasAnyRecognizedAccessGrant(entitlementRows);
-  const hasAppAccess =
-    hasPlatformAccess ||
-    hasScopedAccess ||
-    (allowLocalFallback && isActiveProfileStatus(effectiveProfile?.subscription_status));
+  const hasAppAccess = hasPlatformAccess || hasScopedAccess;
 
   return {
     profile: effectiveProfile,

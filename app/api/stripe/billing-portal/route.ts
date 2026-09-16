@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { resolveStripeBillingIdentity } from "@/lib/stripeBillingIdentity";
 
 export const runtime = "nodejs";
 
@@ -63,24 +64,8 @@ export async function POST(req: NextRequest) {
         ? `${appUrl}/billing?payment_method=updated`
         : `${appUrl}/billing`;
 
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("stripe_customer_id")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    let customerId = profile?.stripe_customer_id ? String(profile.stripe_customer_id) : "";
-
-    if (!customerId && user.email) {
-      const existing = await stripe.customers.list({ email: user.email, limit: 1 });
-      if (existing.data.length > 0) {
-        customerId = existing.data[0].id;
-        await supabaseAdmin
-          .from("profiles")
-          .update({ stripe_customer_id: customerId })
-          .eq("id", user.id);
-      }
-    }
+    const billingIdentity = await resolveStripeBillingIdentity(stripe, user);
+    const customerId = billingIdentity.customerId ?? "";
 
     if (!customerId) {
       return NextResponse.json({ error: "No Stripe customer found for this account." }, { status: 404 });

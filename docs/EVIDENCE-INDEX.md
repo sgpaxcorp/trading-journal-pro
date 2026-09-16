@@ -18,7 +18,6 @@
 - Option Flows Analysis -> `app/(private)/option-flow/page.tsx`
 - Importacion de brokers -> `app/(private)/import/page.tsx`
 - Billing -> `app/billing/*`
-- Forum -> `app/(private)/forum/community-feed/*`
 
 ## Data Inputs
 - Option Flow file types, limits, keywords -> `app/(private)/option-flow/page.tsx`
@@ -41,3 +40,11 @@
 - Env vars -> `app/api/*`, `lib/*`, `proxy.ts`
 - Estructura -> `app/`, `lib/`, `context/`, `hooks/`
 - Lint/build -> salida de `npm run lint` y `npm run build`
+
+## Investment Data Engine
+- Architecture, point-in-time contract, SEC operations, formulas and release gates -> `docs/neuro-analysis/INVESTMENT_DATA_ENGINE.md`
+- Canonical schema and append-only controls -> `supabase/migrations/20260916000600_investment_data_engine.sql`
+- SEC ingestion and durable checkpoints -> `lib/neuroSecEdgarClient.ts`, `lib/neuroInvestmentDataPipeline.ts`
+- Deterministic statements, metrics, screens and valuation -> `lib/neuroFinancialStatements.ts`, `lib/neuroDeterministicMetrics.ts`, `lib/neuroScreeningEngine.ts`, `lib/neuroDcf.ts`, `lib/neuroReverseDcf.ts`, `lib/neuroValuationEngine.ts`
+- Daily discovery scheduler -> `app/api/neuro-analysis/investment-data/schedule/route.ts`, `vercel.json`
+- Point-in-time and calculation tests -> `tests/unit/neuroFinancialStatements.test.ts`, `tests/unit/neuroDeterministicMetrics.test.ts`

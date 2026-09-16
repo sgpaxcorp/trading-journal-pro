@@ -15,6 +15,7 @@ import {
 } from "@/lib/brokerConnections";
 import { resolveLocale } from "@/lib/i18n";
 import {
+  CHECKOUT_DISCLOSURE_VERSION,
   CURRENT_PRIVACY_VERSION,
   CURRENT_TERMS_VERSION,
   FREE_TRIAL_DAYS,
@@ -96,7 +97,11 @@ export default function BillingClient({
   const [autoRenewEnabled, setAutoRenewEnabled] = useState(true);
   const [renewalLoading, setRenewalLoading] = useState(false);
   const [renewalNotice, setRenewalNotice] = useState<string | null>(null);
-  const [checkoutLegalAccepted, setCheckoutLegalAccepted] = useState(false);
+  const [checkoutTermsAccepted, setCheckoutTermsAccepted] = useState(false);
+  const [checkoutPrivacyAccepted, setCheckoutPrivacyAccepted] = useState(false);
+  const [checkoutDisclosureAccepted, setCheckoutDisclosureAccepted] = useState(false);
+  const checkoutLegalAccepted =
+    checkoutTermsAccepted && checkoutPrivacyAccepted && checkoutDisclosureAccepted;
 
   const priceFor = (planId: PlanId) =>
     planMonthlyPrice(planId, billingCycle);
@@ -287,6 +292,10 @@ export default function BillingClient({
           legalAccepted: true,
           termsVersion: CURRENT_TERMS_VERSION,
           privacyVersion: CURRENT_PRIVACY_VERSION,
+          termsReadAccepted: true,
+          privacyReadAccepted: true,
+          checkoutDisclosureAccepted: true,
+          disclosureVersion: CHECKOUT_DISCLOSURE_VERSION,
         }),
       });
 
@@ -351,6 +360,10 @@ export default function BillingClient({
           legalAccepted: true,
           termsVersion: CURRENT_TERMS_VERSION,
           privacyVersion: CURRENT_PRIVACY_VERSION,
+          termsReadAccepted: true,
+          privacyReadAccepted: true,
+          checkoutDisclosureAccepted: true,
+          disclosureVersion: CHECKOUT_DISCLOSURE_VERSION,
         }),
       });
 
@@ -550,28 +563,60 @@ export default function BillingClient({
             )}
           </div>
 
-          <label className="mb-8 flex items-start gap-3 rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-[10px] leading-relaxed text-slate-300">
-            <input
-              type="checkbox"
-              checked={checkoutLegalAccepted}
-              onChange={(event) => setCheckoutLegalAccepted(event.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
-              required
-            />
-            <span>
-              {L(
-                `I accept the current Terms & Conditions and Privacy Policy. I understand the ${FREE_TRIAL_DAYS}-day trial, automatic renewal, prepaid no-refund policy, educational-only use, and no-guaranteed-results disclosure.`,
-                `Acepto los Términos y Condiciones y la Política de Privacidad vigentes. Entiendo el trial de ${FREE_TRIAL_DAYS} días, la renovación automática, la política prepago sin reembolso, el uso educativo y la divulgación de resultados no garantizados.`
-              )}{" "}
-              <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
-                {L("Terms", "Términos")}
-              </a>
-              {" / "}
-              <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
-                {L("Privacy", "Privacidad")}
-              </a>
-            </span>
-          </label>
+          <div className="mb-8 rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-[10px] leading-relaxed text-slate-300">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+              {L("Required subscription agreements", "Acuerdos requeridos de suscripción")}
+            </p>
+            <div className="space-y-2.5">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={checkoutTermsAccepted}
+                  onChange={(event) => setCheckoutTermsAccepted(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L("I have read and accept the current ", "He leído y acepto los ")}
+                  <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                    {L("Terms & Conditions", "Términos y Condiciones")}
+                  </a>
+                  {L(".", " vigentes.")}
+                </span>
+              </label>
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={checkoutPrivacyAccepted}
+                  onChange={(event) => setCheckoutPrivacyAccepted(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L("I have read and accept the current ", "He leído y acepto la ")}
+                  <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                    {L("Privacy Policy", "Política de Privacidad")}
+                  </a>
+                  {L(".", " vigente.")}
+                </span>
+              </label>
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={checkoutDisclosureAccepted}
+                  onChange={(event) => setCheckoutDisclosureAccepted(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L(
+                    `I understand the ${FREE_TRIAL_DAYS}-day trial, automatic renewal, prepaid no-refund policy, educational-only use, and no-guaranteed-results disclosure.`,
+                    `Entiendo el trial de ${FREE_TRIAL_DAYS} días, la renovación automática, la política prepago sin reembolso, el uso educativo y la divulgación de resultados no garantizados.`
+                  )}
+                </span>
+              </label>
+            </div>
+          </div>
 
           {/* Plans */}
           <div className="grid grid-cols-1 md:grid-cols-[1.02fr,0.98fr] gap-4 md:gap-6">

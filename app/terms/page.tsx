@@ -8,7 +8,7 @@ import PublicHomeLogoLink from "@/app/components/PublicHomeLogoLink";
 const CONTENT = {
   en: {
     title: "Terms & Conditions",
-    updated: "Effective Date: September 3, 2026",
+    updated: "Effective Date: September 15, 2026",
     intro:
       "These Terms of Service (\"Terms\") govern your access to and use of the Neuro Trader website, applications, and related services (collectively, the \"Service\") provided by SG PAX CORP. (\"Neuro Trader\", \"NTJ\", \"we\", \"us\", or \"our\").",
     important:
@@ -22,7 +22,7 @@ const CONTENT = {
       {
         title: "2. Description of the Service",
         body:
-          "The Service may include features such as execution records, trading business plans, trade analytics, performance metrics, tagging and notes, screenshots and attachments, dashboards, integrations with third-party platforms, community or sharing features (if enabled), Neuro Analysis, Option Flows Analysis, and AI-assisted coaching and insights. The Service is designed for educational learning, journaling, analysis, simulation, operational accountability, and business-performance review. It is not designed to execute trades for you or replace independent judgment or licensed professional advice. We may add, remove, or modify features at any time. You are responsible for obtaining and maintaining all devices, software, and internet access necessary to use the Service.",
+          "The Service may include features such as execution records, trading business plans, trade analytics, performance metrics, tagging and notes, screenshots and attachments, dashboards, integrations with third-party platforms, Neuro Analysis, Option Flows Analysis, and AI-assisted coaching and insights. The Service is designed for educational learning, journaling, analysis, simulation, operational accountability, and business-performance review. It is not designed to execute trades for you or replace independent judgment or licensed professional advice. We may add, remove, or modify features at any time. You are responsible for obtaining and maintaining all devices, software, and internet access necessary to use the Service.",
       },
       {
         title: "3. Eligibility and Account Registration",
@@ -72,7 +72,7 @@ const CONTENT = {
       {
         title: "6. Trading Risk Disclosure",
         body:
-          "Trading and investing involve substantial risk and are not suitable for all individuals. You can lose some or all of your capital, and losses may exceed deposits when leverage, options, futures, margin, or similar products are used. Past performance, back-tested results, hypothetical examples, simulated results, screenshots, community results, or platform analytics are not indicative of future results. You are solely responsible for determining whether any trading strategy, instrument, product, risk level, or approach is appropriate for you.",
+          "Trading and investing involve substantial risk and are not suitable for all individuals. You can lose some or all of your capital, and losses may exceed deposits when leverage, options, futures, margin, or similar products are used. Past performance, back-tested results, hypothetical examples, simulated results, screenshots, or platform analytics are not indicative of future results. You are solely responsible for determining whether any trading strategy, instrument, product, risk level, or approach is appropriate for you.",
       },
       {
         title: "6.1 Trading Business Plan Projections and Discipline",
@@ -87,7 +87,7 @@ const CONTENT = {
       {
         title: "8. User Content and Permissions",
         body:
-          "You retain ownership of the content you submit to the Service (including trade data, notes, images, attachments, and other materials) (\"User Content\"). You grant NTJ a non-exclusive, worldwide, royalty-free license to host, store, process, reproduce, and display User Content as necessary to operate, improve, and provide the Service. If the Service offers sharing/public features and you choose to share User Content publicly, you understand that other users may view or access that content. You are responsible for ensuring that your User Content does not contain confidential information you are not authorized to share.",
+          "You retain ownership of the content you submit to the Service (including trade data, notes, images, attachments, and other materials) (\"User Content\"). You grant NTJ a non-exclusive, worldwide, royalty-free license to host, store, process, reproduce, and display User Content as necessary to operate, improve, and provide the Service. You are responsible for ensuring that your User Content does not contain confidential information you are not authorized to provide.",
       },
       {
         title: "9. Subscriptions, Billing, and Cancellations",
@@ -163,7 +163,7 @@ const CONTENT = {
   },
   es: {
     title: "Términos y Condiciones",
-    updated: "Fecha de vigencia: 3 de septiembre de 2026",
+    updated: "Fecha de vigencia: 15 de septiembre de 2026",
     intro:
       "Estos Términos de Servicio (los \"Términos\") rigen tu acceso y uso del sitio web, las aplicaciones y los servicios relacionados de Neuro Trader (colectivamente, el \"Servicio\") provistos por SG PAX CORP. (\"Neuro Trader\", \"NTJ\", \"nosotros\", \"nos\" o \"nuestro\").",
     important:
@@ -177,7 +177,7 @@ const CONTENT = {
       {
         title: "2. Descripción del Servicio",
         body:
-          "El Servicio puede incluir funciones como registros de ejecución, planes de empresa de trading, analítica de trading, métricas de rendimiento, etiquetas y notas, screenshots y adjuntos, dashboards, integraciones con plataformas de terceros, funciones comunitarias o de compartición (si están habilitadas), Neuro Analysis, Option Flows Analysis, y coaching e insights con IA. El Servicio está diseñado para aprendizaje educativo, journaling, análisis, simulación, accountability operativo y revisión de rendimiento empresarial. No está diseñado para ejecutar operaciones por ti ni para reemplazar tu juicio independiente o asesoría profesional autorizada. Podemos añadir, eliminar o modificar funciones en cualquier momento. Eres responsable de obtener y mantener todos los dispositivos, software y acceso a internet necesarios para usar el Servicio.",
+          "El Servicio puede incluir funciones como registros de ejecución, planes de empresa de trading, analítica de trading, métricas de rendimiento, etiquetas y notas, screenshots y adjuntos, dashboards, integraciones con plataformas de terceros, Neuro Analysis, Option Flows Analysis, y coaching e insights con IA. El Servicio está diseñado para aprendizaje educativo, journaling, análisis, simulación, accountability operativo y revisión de rendimiento empresarial. No está diseñado para ejecutar operaciones por ti ni para reemplazar tu juicio independiente o asesoría profesional autorizada. Podemos añadir, eliminar o modificar funciones en cualquier momento. Eres responsable de obtener y mantener todos los dispositivos, software y acceso a internet necesarios para usar el Servicio.",
       },
       {
         title: "3. Elegibilidad y registro de cuenta",
@@ -227,7 +227,7 @@ const CONTENT = {
       {
         title: "6. Divulgación de riesgo de trading",
         body:
-          "El trading y la inversión implican riesgo sustancial y no son adecuados para todos. Puedes perder parte o la totalidad de tu capital, y las pérdidas pueden exceder los depósitos cuando se usa apalancamiento, opciones, futuros, margen o productos similares. El rendimiento pasado, resultados de back-testing, ejemplos hipotéticos, resultados simulados, screenshots, resultados de comunidad o analítica de la plataforma no son indicativos de resultados futuros. Eres el único responsable de determinar si una estrategia, instrumento, producto, nivel de riesgo o enfoque es apropiado para ti.",
+          "El trading y la inversión implican riesgo sustancial y no son adecuados para todos. Puedes perder parte o la totalidad de tu capital, y las pérdidas pueden exceder los depósitos cuando se usa apalancamiento, opciones, futuros, margen o productos similares. El rendimiento pasado, resultados de back-testing, ejemplos hipotéticos, resultados simulados, screenshots o analítica de la plataforma no son indicativos de resultados futuros. Eres el único responsable de determinar si una estrategia, instrumento, producto, nivel de riesgo o enfoque es apropiado para ti.",
       },
       {
         title: "6.1 Proyecciones y disciplina del Plan de Empresa de Trading",
@@ -242,7 +242,7 @@ const CONTENT = {
       {
         title: "8. Contenido del usuario y permisos",
         body:
-          "Conservas la propiedad del contenido que envías al Servicio (data de trades, notas, imágenes, adjuntos, etc.) (\"Contenido del Usuario\"). Concedes a NTJ una licencia no exclusiva, mundial y libre de regalías para alojar, almacenar, procesar, reproducir y mostrar el Contenido del Usuario según sea necesario para operar y mejorar el Servicio. Si habilitas funciones públicas, otros usuarios pueden ver ese contenido. Eres responsable de no compartir información confidencial que no estés autorizado a divulgar.",
+          "Conservas la propiedad del contenido que envías al Servicio (data de trades, notas, imágenes, adjuntos, etc.) (\"Contenido del Usuario\"). Concedes a NTJ una licencia no exclusiva, mundial y libre de regalías para alojar, almacenar, procesar, reproducir y mostrar el Contenido del Usuario según sea necesario para operar y mejorar el Servicio. Eres responsable de no proporcionar información confidencial que no estés autorizado a divulgar.",
       },
       {
         title: "9. Suscripciones, facturación y cancelaciones",

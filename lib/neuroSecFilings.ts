@@ -13,6 +13,37 @@ export type NeuroSecCompanyDocument = {
   filingDetailUrl: string;
 };
 
+export type NeuroSecMaterialDocument = Omit<NeuroSecCompanyDocument, "form"> & {
+  form: string;
+  description: string;
+};
+
+const MATERIAL_SEC_FORMS = new Set([
+  "10-K",
+  "10-K/A",
+  "10-Q",
+  "10-Q/A",
+  "8-K",
+  "8-K/A",
+  "6-K",
+  "20-F",
+  "20-F/A",
+  "40-F",
+  "DEF 14A",
+  "DEFA14A",
+  "SC 13D",
+  "SC 13D/A",
+  "SC 13G",
+  "SC 13G/A",
+  "S-1",
+  "S-3",
+  "S-4",
+  "424B2",
+  "424B3",
+  "424B5",
+  "4",
+]);
+
 const SEC_FETCH_TIMEOUT_MS = 15_000;
 export const MAX_SEC_FILING_BYTES = 35 * 1024 * 1024;
 
@@ -114,6 +145,57 @@ export function buildRecentSecCompanyDocuments(input: {
     .slice(0, Math.max(1, Math.min(input.limit ?? 12, 100)));
 }
 
+export function buildRecentSecMaterialDocuments(input: {
+  ticker: string;
+  company: { cik_str?: number | string; title?: string };
+  submissions: any;
+  limit?: number;
+}): NeuroSecMaterialDocument[] {
+  const ticker = sanitizeSecTicker(input.ticker);
+  const cik = String(input.company?.cik_str ?? "").padStart(10, "0");
+  if (!ticker || !/^\d{10}$/.test(cik)) return [];
+
+  const recent = input.submissions?.filings?.recent ?? {};
+  const forms: unknown[] = Array.isArray(recent.form) ? recent.form : [];
+  const accessionNumbers: unknown[] = Array.isArray(recent.accessionNumber) ? recent.accessionNumber : [];
+  const primaryDocuments: unknown[] = Array.isArray(recent.primaryDocument) ? recent.primaryDocument : [];
+  const filingDates: unknown[] = Array.isArray(recent.filingDate) ? recent.filingDate : [];
+  const reportDates: unknown[] = Array.isArray(recent.reportDate) ? recent.reportDate : [];
+  const descriptions: unknown[] = Array.isArray(recent.primaryDocDescription)
+    ? recent.primaryDocDescription
+    : [];
+  const cikPath = cikWithoutLeadingZeros(cik);
+
+  return forms
+    .map((value, index): NeuroSecMaterialDocument | null => {
+      const form = String(value ?? "").toUpperCase();
+      if (!MATERIAL_SEC_FORMS.has(form)) return null;
+      const accessionNumber = sanitizeSecAccessionNumber(accessionNumbers[index]);
+      const primaryDocument = sanitizePrimaryDocument(primaryDocuments[index]);
+      if (!accessionNumber || !primaryDocument) return null;
+      const accessionPath = accessionNoDashes(accessionNumber);
+      const filingDate = String(filingDates[index] ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(filingDate)) return null;
+      const periodEnd = String(reportDates[index] ?? "").slice(0, 10) || null;
+      const archiveRoot = `https://www.sec.gov/Archives/edgar/data/${cikPath}/${accessionPath}`;
+      return {
+        ticker,
+        companyName: String(input.company?.title ?? ticker),
+        cik,
+        form,
+        description: String(descriptions[index] ?? form).trim().slice(0, 240) || form,
+        accessionNumber,
+        filingDate,
+        periodEnd,
+        primaryDocument,
+        documentUrl: `${archiveRoot}/${primaryDocument}`,
+        filingDetailUrl: `${archiveRoot}/`,
+      };
+    })
+    .filter((document): document is NeuroSecMaterialDocument => Boolean(document))
+    .slice(0, Math.max(1, Math.min(input.limit ?? 40, 100)));
+}
+
 export async function listRecentSecCompanyDocuments(tickerInput: unknown, limit = 12) {
   const ticker = sanitizeSecTicker(tickerInput);
   if (!ticker) throw new Error("Ticker is required.");
@@ -129,6 +211,28 @@ export async function listRecentSecCompanyDocuments(tickerInput: unknown, limit 
   const cik = String(company.cik_str).padStart(10, "0");
   const submissions = await secFetchJson(`https://data.sec.gov/submissions/CIK${cik}.json`);
   const documents = buildRecentSecCompanyDocuments({ ticker, company, submissions, limit });
+  return {
+    ticker,
+    company: { name: company.title ?? ticker, cik },
+    documents,
+  };
+}
+
+export async function listRecentSecMaterialDocuments(tickerInput: unknown, limit = 40) {
+  const ticker = sanitizeSecTicker(tickerInput);
+  if (!ticker) throw new Error("Ticker is required.");
+
+  const tickers = await secFetchJson("https://www.sec.gov/files/company_tickers.json");
+  const company = Object.values(tickers as Record<string, any>).find(
+    (row: any) => sanitizeSecTicker(row?.ticker) === ticker
+  ) as { cik_str?: number | string; title?: string } | undefined;
+  if (!company?.cik_str) {
+    return { ticker, company: null, documents: [] as NeuroSecMaterialDocument[] };
+  }
+
+  const cik = String(company.cik_str).padStart(10, "0");
+  const submissions = await secFetchJson(`https://data.sec.gov/submissions/CIK${cik}.json`);
+  const documents = buildRecentSecMaterialDocuments({ ticker, company, submissions, limit });
   return {
     ticker,
     company: { name: company.title ?? ticker, cik },

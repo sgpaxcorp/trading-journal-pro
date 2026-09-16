@@ -104,12 +104,12 @@ async function resolveUserIdByEmail(email?: string | null): Promise<string | nul
 async function resolveUserIdByCustomer(customerId?: string | null): Promise<string | null> {
   if (!customerId) return null;
   const { data, error } = await supabaseAdmin
-    .from("profiles")
-    .select("id")
+    .from("user_entitlements")
+    .select("user_id")
     .eq("stripe_customer_id", customerId)
     .limit(1);
   if (error || !data?.length) return null;
-  return String(data[0].id);
+  return String(data[0].user_id);
 }
 
 async function resolvePartnerUserIdByCode(code?: string | null): Promise<string | null> {
@@ -198,18 +198,24 @@ type ResolvedProfile = {
 
 async function resolveProfileByCustomer(customerId?: string | null): Promise<ResolvedProfile | null> {
   if (!customerId) return null;
-  const { data, error } = await supabaseAdmin
-    .from("profiles")
-    .select("id,email,first_name,plan")
+  const { data: entitlement, error: entitlementError } = await supabaseAdmin
+    .from("user_entitlements")
+    .select("user_id,metadata")
     .eq("stripe_customer_id", customerId)
     .limit(1)
+    .maybeSingle();
+  if (entitlementError || !entitlement?.user_id) return null;
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("id,email,first_name")
+    .eq("id", entitlement.user_id)
     .maybeSingle();
   if (error || !data) return null;
   return {
     id: String((data as any).id),
     email: ((data as any).email as string | null) ?? null,
     firstName: ((data as any).first_name as string | null) ?? null,
-    plan: normalizePlanId((data as any).plan),
+    plan: normalizePlanId((entitlement.metadata as Record<string, unknown> | null)?.plan as string | null),
   };
 }
 
@@ -496,7 +502,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  console.log("[WEBHOOK] Received event:", event.type);
+  console.log("[WEBHOOK] Received verified event:", event.type);
+
+  const { data: claim, error: claimError } = await supabaseAdmin.rpc(
+    "claim_stripe_webhook_event",
+    {
+      p_event_id: event.id,
+      p_event_type: event.type,
+      p_stripe_created_at: new Date(event.created * 1000).toISOString(),
+    }
+  );
+  if (claimError) {
+    console.error("[WEBHOOK] Could not claim event:", claimError.message);
+    return NextResponse.json({ error: "Webhook event ledger unavailable" }, { status: 503 });
+  }
+  if ((claim as { claimed?: boolean } | null)?.claimed === false) {
+    return NextResponse.json({ received: true, duplicate: true });
+  }
 
   try {
     switch (event.type) {
@@ -525,12 +547,6 @@ export async function POST(req: NextRequest) {
           null;
 
         const customerName = session.customer_details?.name ?? null;
-        console.log("[WEBHOOK] checkout.session.completed raw metadata:", {
-          sessionMetadata: session.metadata,
-          subscriptionId,
-          customerId,
-          email,
-        });
 
         // Fallback: buscar metadata en la suscripción si el userId / planId vienen vacíos
         let subscription: Stripe.Subscription | null = null;
@@ -547,9 +563,6 @@ export async function POST(req: NextRequest) {
             (subscription.metadata?.planId as PlanId | undefined) ||
             (subscription.metadata?.plan as PlanId | undefined);
 
-          console.log("[WEBHOOK] subscription metadata fallback:", {
-            subscriptionMetadata: subscription.metadata,
-          });
         }
 
         if (!subscription && typeof subscriptionId === "string") {
@@ -604,10 +617,7 @@ export async function POST(req: NextRequest) {
               stripePriceId: subPriceId ?? resolveAddonPriceId(subscription, resolvedKey),
             });
           } else {
-            console.warn("[WEBHOOK] Add-on purchase without userId/email", {
-              customerId,
-              subscriptionId,
-            });
+            console.warn("[WEBHOOK] Add-on purchase could not be linked to an authenticated account.");
           }
 
           break;
@@ -616,10 +626,7 @@ export async function POST(req: NextRequest) {
         // Si no logramos userId, intentamos actualizar por email
         if (!userId) {
           if (email) {
-            console.warn(
-              "[WEBHOOK] No userId in metadata, attempting update by email:",
-              email
-            );
+            console.warn("[WEBHOOK] Checkout metadata did not include userId; using verified customer email fallback.");
 
             let planId: PlanId = planIdMeta ?? "core";
 
@@ -630,7 +637,7 @@ export async function POST(req: NextRequest) {
                 (await stripe.subscriptions.retrieve(subscriptionId));
 
               const priceId = subToInspect.items.data[0]?.price?.id;
-              console.log("[WEBHOOK] priceId fallback (no userId):", priceId);
+              console.log("[WEBHOOK] Resolved plan from subscription price fallback.");
               planId = resolvePlanIdFromPriceId(priceId) ?? planId;
             }
 
@@ -648,10 +655,7 @@ export async function POST(req: NextRequest) {
                 profileError
               );
             } else {
-              console.log(
-                "[WEBHOOK] profiles updated successfully by email",
-                email
-              );
+              console.log("[WEBHOOK] Profile updated through verified email fallback.");
 
               const resolvedUserId =
                 (await resolveUserIdByEmail(email)) || (await resolveUserIdByCustomer(customerId));
@@ -722,7 +726,7 @@ export async function POST(req: NextRequest) {
                       subscriptionId: subscriptionId ?? undefined,
                     }),
                 });
-                console.log("[WEBHOOK] Welcome + confirmation emails sent (by email branch) to", email);
+                console.log("[WEBHOOK] Welcome and confirmation emails delivered.");
               } catch (mailErr) {
                 console.error(
                   "[WEBHOOK] Error sending emails (by email branch):",
@@ -750,16 +754,9 @@ export async function POST(req: NextRequest) {
               : null);
 
           const priceId = subToInspect?.items.data[0]?.price?.id;
-          console.log("[WEBHOOK] priceId fallback:", priceId);
+          console.log("[WEBHOOK] Resolved plan from subscription price fallback.");
           planId = resolvePlanIdFromPriceId(priceId) ?? planId;
         }
-
-        console.log("[WEBHOOK] Resolving user + plan:", {
-          userId,
-          planId,
-          customerId,
-          subscriptionId,
-        });
 
         // 1) Actualiza la tabla profiles
         const { error: profileError } = await supabaseAdmin
@@ -776,10 +773,7 @@ export async function POST(req: NextRequest) {
             profileError
           );
         } else {
-          console.log(
-            "[WEBHOOK] profiles updated successfully for",
-            userId
-          );
+          console.log("[WEBHOOK] Profile subscription state updated.");
         }
 
         // 2) Actualiza también user_metadata para que el guard lo vea
@@ -797,10 +791,7 @@ export async function POST(req: NextRequest) {
             metaError
           );
         } else {
-          console.log(
-            "[WEBHOOK] user_metadata updated successfully for",
-            userId
-          );
+          console.log("[WEBHOOK] Authentication metadata updated.");
         }
 
         await upsertEntitlement({
@@ -846,7 +837,7 @@ export async function POST(req: NextRequest) {
                   subscriptionId: subscriptionId ?? undefined,
                 }),
             });
-            console.log("[WEBHOOK] Welcome + confirmation emails sent (userId branch) to", email);
+            console.log("[WEBHOOK] Welcome and confirmation emails delivered.");
           } catch (mailErr) {
             console.error(
               "[WEBHOOK] Error sending emails (userId branch):",
@@ -882,9 +873,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        console.log(
-          `[WEBHOOK] Subscription ${subscriptionStatus} for user ${userId} with plan ${planId}.`
-        );
+        console.log(`[WEBHOOK] Platform subscription processed with status ${subscriptionStatus}.`);
         break;
       }
 
@@ -904,11 +893,7 @@ export async function POST(req: NextRequest) {
           isTruthy(subscription.metadata?.addonBrokerSync) ||
           hasAddonLineItem(subscription, "broker_sync");
 
-        console.log(
-          "[WEBHOOK] customer.subscription.deleted:",
-          customerId,
-          status
-        );
+        console.log(`[WEBHOOK] customer.subscription.deleted processed with status ${status}.`);
 
         if (standaloneAddon) {
           const keyFromMeta =
@@ -1036,11 +1021,7 @@ export async function POST(req: NextRequest) {
           isTruthy(subscription.metadata?.addonBrokerSync) ||
           hasAddonLineItem(subscription, "broker_sync");
 
-        console.log(
-          "[WEBHOOK] customer.subscription.updated:",
-          customerId,
-          status
-        );
+        console.log(`[WEBHOOK] customer.subscription.updated processed with status ${status}.`);
 
         if (standaloneAddon) {
           const keyFromMeta =
@@ -1328,9 +1309,24 @@ export async function POST(req: NextRequest) {
         break;
     }
 
+    await supabaseAdmin
+      .from("stripe_webhook_events")
+      .update({
+        status: "completed",
+        processed_at: new Date().toISOString(),
+        last_error: null,
+      })
+      .eq("event_id", event.id);
     return NextResponse.json({ received: true });
   } catch (err) {
     console.error("Error handling Stripe webhook:", err);
+    await supabaseAdmin
+      .from("stripe_webhook_events")
+      .update({
+        status: "failed",
+        last_error: err instanceof Error ? err.message.slice(0, 1000) : "Webhook handler failed",
+      })
+      .eq("event_id", event.id);
     return NextResponse.json(
       { error: "Webhook handler failed" },
       { status: 500 }

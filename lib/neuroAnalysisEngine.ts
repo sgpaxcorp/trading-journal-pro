@@ -1,9 +1,23 @@
+import { buildReverseDcfAnalysis } from "@/lib/neuroReverseDcf";
+import {
+  createFinancialIntegrityManifest,
+  financialAssumption,
+  financialCalculation,
+  financialFact,
+  financialNumberOrNull,
+  financialTraceId,
+  mergeFinancialIntegrityManifests,
+  type FinancialDataIntegrityManifest,
+  type FinancialTraceRecord,
+} from "@/lib/neuroFinancialDataIntegrity";
+
 export type NeuroHoldingInput = {
   ticker: string;
   shares: number;
-  averageCost: number;
+  averageCost: number | null;
   currentPrice?: number | null;
   openedAt?: string | null;
+  researchOnly?: boolean;
 };
 
 export type NeuroAssumptions = {
@@ -47,6 +61,21 @@ export type NeuroMarketDataItem = {
     netIncome?: number | null;
     operatingCashFlow?: number | null;
     freeCashFlow?: number | null;
+    capitalExpenditures?: number | null;
+    accountsReceivable?: number | null;
+    inventory?: number | null;
+    goodwillAndIntangibleAssets?: number | null;
+    stockBasedCompensation?: number | null;
+    dilutedAverageShares?: number | null;
+    deferredRevenue?: number | null;
+    deferredTaxAssets?: number | null;
+    deferredTaxLiabilities?: number | null;
+    netDeferredTaxes?: number | null;
+    changeInWorkingCapital?: number | null;
+    totalAssets?: number | null;
+    pretaxIncome?: number | null;
+    incomeTaxExpense?: number | null;
+    cashAndCashEquivalents?: number | null;
     dilutedEPS?: number | null;
     totalDebt?: number | null;
     stockholdersEquity?: number | null;
@@ -57,6 +86,7 @@ export type NeuroMarketDataItem = {
   }>;
   priceHistory?: Array<{ date: string; close: number }>;
   yearlyPrice?: Array<{ year: number; firstClose: number; lastClose: number; returnPct?: number | null }>;
+  financialDataIntegrity?: FinancialDataIntegrityManifest;
   errors?: Record<string, string | null>;
 };
 
@@ -80,13 +110,11 @@ const DEFAULT_ASSUMPTIONS = {
 };
 
 function finiteNumber(value: unknown, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return financialNumberOrNull(value) ?? fallback;
 }
 
 function maybeNumber(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  return financialNumberOrNull(value);
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -160,9 +188,9 @@ function daysSince(value?: string | null) {
   return Math.max(1, Math.round((Date.now() - started) / (24 * 60 * 60 * 1000)));
 }
 
-function annualizedReturn(currentValue: number, invested: number, openedAt?: string | null) {
+function annualizedReturn(currentValue: number | null, invested: number | null, openedAt?: string | null) {
   const days = daysSince(openedAt);
-  if (!days || days < 30 || currentValue <= 0 || invested <= 0) return null;
+  if (!days || days < 30 || currentValue == null || invested == null || currentValue <= 0 || invested <= 0) return null;
   const value = Math.pow(currentValue / invested, 365 / days) - 1;
   return Number.isFinite(value) ? value : null;
 }
@@ -172,7 +200,7 @@ function deriveGrowth(item?: NeuroMarketDataItem | null, overridePct?: number | 
     return clamp(Number(overridePct) / 100, -0.15, 0.3);
   }
   const rows = [...(item?.annualFundamentals ?? [])].sort((a, b) => Number(a.year) - Number(b.year));
-  if (rows.length < 2) return 0.04;
+  if (rows.length < 2) return null;
 
   const first = rows[0];
   const last = rows[rows.length - 1];
@@ -180,7 +208,7 @@ function deriveGrowth(item?: NeuroMarketDataItem | null, overridePct?: number | 
   const revenueGrowth = cagr(maybeNumber(first.totalRevenue), maybeNumber(last.totalRevenue), years);
   const fcfGrowth = cagr(maybeNumber(first.freeCashFlow), maybeNumber(last.freeCashFlow), years);
   const values = [revenueGrowth, fcfGrowth].filter((value): value is number => value != null);
-  if (!values.length) return 0.04;
+  if (!values.length) return null;
   return clamp(values.reduce((sum, value) => sum + value, 0) / values.length, -0.1, 0.18);
 }
 
@@ -211,7 +239,8 @@ function dcfValue({
   return Number.isFinite(presentValue) ? presentValue : null;
 }
 
-function scenarioGrowths(baseGrowth: number): Record<ScenarioName, number> {
+function scenarioGrowths(baseGrowth: number | null): Record<ScenarioName, number | null> {
+  if (baseGrowth == null) return { bear: null, base: null, bull: null };
   return {
     bear: clamp(baseGrowth - 0.06, -0.15, 0.12),
     base: clamp(baseGrowth, -0.1, 0.18),
@@ -226,29 +255,13 @@ function valuationStatusFromUpside(upside: number | null) {
   return "fairly_valued";
 }
 
-function targetWeightFromQuality(input: {
-  marginOfSafety: number | null;
-  fcfMargin: number | null;
-  debtToEquity: number | null;
-  currentWeight: number;
-  missingFilings: boolean;
-}) {
-  let score = 0.5;
-  if (input.marginOfSafety != null) score += clamp(input.marginOfSafety, -0.5, 0.5);
-  if (input.fcfMargin != null) score += clamp(input.fcfMargin, -0.2, 0.25);
-  if (input.debtToEquity != null && input.debtToEquity > 1.5) score -= 0.12;
-  if (input.missingFilings) score -= 0.08;
-  if (input.currentWeight > 0.25) score -= 0.1;
-  return clamp(score, 0.05, 0.9);
-}
-
-function verdictFromMargin(marginOfSafety: number | null, missingFilings: boolean) {
-  if (missingFilings) return "provisional";
-  if (marginOfSafety == null) return "watchlist";
-  if (marginOfSafety >= 0.25) return "add";
-  if (marginOfSafety >= 0.05) return "hold";
-  if (marginOfSafety >= -0.15) return "trim";
-  return "avoid";
+function valuationPostureFromMargin(marginOfSafety: number | null, missingFilings: boolean) {
+  if (missingFilings) return "evidence_incomplete";
+  if (marginOfSafety == null) return "valuation_unavailable";
+  if (marginOfSafety >= 0.25) return "material_discount_to_model";
+  if (marginOfSafety >= 0.05) return "discount_to_model";
+  if (marginOfSafety >= -0.15) return "near_model_value";
+  return "premium_to_model";
 }
 
 export function computeDocumentReadiness(
@@ -307,11 +320,13 @@ export function computeDocumentReadiness(
 }
 
 export function buildNeuroAnalysisEngine(input: {
+  language?: "en" | "es";
   holdings: NeuroHoldingInput[];
   marketData?: unknown;
   filings?: NeuroFilingMetadata[];
   assumptions?: NeuroAssumptions;
 }) {
+  const generatedAt = new Date().toISOString();
   const assumptions = {
     ...DEFAULT_ASSUMPTIONS,
     ...(input.assumptions ?? {}),
@@ -330,39 +345,46 @@ export function buildNeuroAnalysisEngine(input: {
       const price =
         maybeNumber(holding.currentPrice) ??
         maybeNumber(market?.market?.regularMarketPrice) ??
-        maybeNumber(market?.market?.previousClose) ??
-        0;
+        maybeNumber(market?.market?.previousClose);
       const shares = Math.max(0, finiteNumber(holding.shares));
-      const averageCost = Math.max(0, finiteNumber(holding.averageCost));
-      const invested = shares * averageCost;
-      const currentValue = shares * price;
-      const pnl = currentValue - invested;
+      const averageCostValue = maybeNumber(holding.averageCost);
+      const averageCost = averageCostValue == null ? null : Math.max(0, averageCostValue);
+      const invested = averageCost == null ? null : shares * averageCost;
+      const currentValue = price == null ? null : shares * price;
+      const pnl = currentValue == null || invested == null ? null : currentValue - invested;
       const positionAnnualizedReturn = annualizedReturn(currentValue, invested, holding.openedAt);
       const latest = latestFundamentals(market);
       const baseCashFlow =
         maybeNumber(latest?.freeCashFlow) ??
         maybeNumber(latest?.operatingCashFlow) ??
-        maybeNumber(latest?.netIncome) ??
-        0;
+        maybeNumber(latest?.netIncome);
       const marketCap = maybeNumber(market?.market?.marketCap);
       const baseGrowth = deriveGrowth(market, assumptions.baseGrowthPct ?? null);
       const growths = scenarioGrowths(baseGrowth);
-      const debt = maybeNumber(latest?.totalDebt) ?? 0;
+      const debt = maybeNumber(latest?.totalDebt);
+      const cash = maybeNumber(latest?.cashAndCashEquivalents);
       const scenarioValueForHorizon = (scenario: ScenarioName, years: number) => {
-        const equityValue = dcfValue({
-          baseCashFlow,
-          growth: growths[scenario],
-          discountRate,
-          terminalGrowth,
-          horizonYears: years,
-        });
-        const adjustedEquityValue = equityValue == null ? null : Math.max(0, equityValue - debt);
+        const scenarioGrowth = growths[scenario];
+        const enterpriseValue =
+          baseCashFlow == null || scenarioGrowth == null || debt == null || cash == null
+            ? null
+            : dcfValue({
+                baseCashFlow,
+                growth: scenarioGrowth,
+                discountRate,
+                terminalGrowth,
+                horizonYears: years,
+              });
+        const adjustedEquityValue =
+          enterpriseValue == null || debt == null || cash == null
+            ? null
+            : Math.max(0, enterpriseValue - debt + cash);
         const upsideToMarket =
           adjustedEquityValue != null && marketCap && marketCap > 0
             ? adjustedEquityValue / marketCap - 1
             : null;
         return {
-          growth: growths[scenario],
+          growth: scenarioGrowth,
           intrinsicEquityValue: adjustedEquityValue,
           upsideToMarket,
         };
@@ -371,7 +393,7 @@ export function buildNeuroAnalysisEngine(input: {
         (Object.keys(growths) as ScenarioName[]).map((scenario) => {
           return [scenario, scenarioValueForHorizon(scenario, horizonYears)];
         })
-      ) as Record<ScenarioName, { growth: number; intrinsicEquityValue: number | null; upsideToMarket: number | null }>;
+      ) as Record<ScenarioName, { growth: number | null; intrinsicEquityValue: number | null; upsideToMarket: number | null }>;
       const valuationLadder = Array.from({ length: 9 }, (_, index) => index + 2).map((year) => {
         const bear = scenarioValueForHorizon("bear", year);
         const base = scenarioValueForHorizon("base", year);
@@ -388,11 +410,26 @@ export function buildNeuroAnalysisEngine(input: {
       const marginOfSafety = pct(scenarioValues.base.upsideToMarket);
       const docs = documentReadiness.find((row) => row.ticker === ticker);
       const missingFilings = !docs?.ready;
-      const verdict = verdictFromMargin(marginOfSafety, missingFilings);
+      const verdict = valuationPostureFromMargin(marginOfSafety, missingFilings);
       const fcfMargin = pct(latest?.fcfMargin);
       const debtToEquity = pct(latest?.debtToEquity);
+      const reverseDcf = buildReverseDcfAnalysis({
+        language: input.language,
+        ticker,
+        companyName: market?.company?.name,
+        sector: market?.company?.sector,
+        industry: market?.company?.industry,
+        instrumentType: market?.instrumentType ?? market?.company?.quoteType,
+        currentPrice: price,
+        marketCap,
+        annualFundamentals: market?.annualFundamentals,
+        horizonYears: Math.max(10, horizonYears),
+        defaultCostOfCapitalPct: discountRate * 100,
+        defaultTerminalGrowthPct: terminalGrowth * 100,
+      });
       return {
         ticker,
+        researchOnly: Boolean(holding.researchOnly),
         company: market?.company ?? null,
         shares,
         averageCost,
@@ -400,7 +437,7 @@ export function buildNeuroAnalysisEngine(input: {
         invested,
         currentValue,
         pnl,
-        pnlPct: invested > 0 ? pnl / invested : null,
+        pnlPct: invested != null && invested > 0 && pnl != null ? pnl / invested : null,
         openedAt: holding.openedAt ?? null,
         annualizedReturn: positionAnnualizedReturn,
         marketCap,
@@ -426,77 +463,65 @@ export function buildNeuroAnalysisEngine(input: {
           selectedHorizonScenarios: scenarioValues,
           projectionYears: valuationLadder,
         },
+        reverseDcf,
         documentReadiness: docs ?? null,
       };
     })
     .filter((position) => position.ticker && position.shares > 0);
 
-  const totalValue = positions.reduce((sum, row) => sum + row.currentValue, 0);
-  const totalInvested = positions.reduce((sum, row) => sum + row.invested, 0);
+  const totalValue = positions.some((row) => row.currentValue == null)
+    ? null
+    : positions.reduce((sum, row) => sum + (row.currentValue ?? 0), 0);
+  const totalInvested = positions.some((row) => row.invested == null)
+    ? null
+    : positions.reduce((sum, row) => sum + (row.invested ?? 0), 0);
   const annualizedCostBase = positions.reduce(
-    (sum, row) => sum + (row.annualizedReturn != null ? row.invested : 0),
+      (sum, row) => sum + (row.annualizedReturn != null && row.invested != null ? row.invested : 0),
     0
   );
   const portfolioAnnualizedReturn =
     annualizedCostBase > 0
       ? positions.reduce(
-          (sum, row) => sum + (row.annualizedReturn != null ? row.annualizedReturn * row.invested : 0),
+          (sum, row) => sum + (row.annualizedReturn != null && row.invested != null ? row.annualizedReturn * row.invested : 0),
           0
         ) / annualizedCostBase
       : null;
   const enrichedPositions = positions.map((position) => ({
     ...position,
-    weight: totalValue > 0 ? position.currentValue / totalValue : 0,
+    weight:
+      totalValue != null && totalValue > 0 && position.currentValue != null
+        ? position.currentValue / totalValue
+        : null,
   }));
   const concentration = {
     largest: enrichedPositions.reduce<any | null>(
-      (current, row) => (!current || row.currentValue > current.currentValue ? row : current),
+      (current, row) =>
+        row.currentValue != null && (!current || row.currentValue > current.currentValue) ? row : current,
       null
     ),
-    top3Weight: enrichedPositions
+    top3Weight: enrichedPositions.some((row) => row.weight == null)
+      ? null
+      : enrichedPositions
       .slice()
-      .sort((a, b) => b.currentValue - a.currentValue)
+      .sort((a, b) => (b.currentValue ?? -Infinity) - (a.currentValue ?? -Infinity))
       .slice(0, 3)
-      .reduce((sum, row) => sum + row.weight, 0),
-    hhi: enrichedPositions.reduce((sum, row) => sum + row.weight * row.weight, 0),
+      .reduce((sum, row) => sum + (row.weight ?? 0), 0),
+    hhi: enrichedPositions.some((row) => row.weight == null)
+      ? null
+      : enrichedPositions.reduce((sum, row) => sum + (row.weight ?? 0) * (row.weight ?? 0), 0),
   };
 
-  const allocationRaw = enrichedPositions.map((position) => ({
+  const allocation = enrichedPositions.map((position) => ({
     ticker: position.ticker,
     currentWeight: position.weight,
-    targetScore: targetWeightFromQuality({
-      marginOfSafety: position.derived.marginOfSafety,
-      fcfMargin: position.derived.fcfMargin,
-      debtToEquity: position.derived.debtToEquity,
-      currentWeight: position.weight,
-      missingFilings: !position.documentReadiness?.ready,
-    }),
     verdict: position.derived.verdict,
+    targetWeight: null,
+    targetValue: null,
+    deltaValue: null,
   }));
-  const scoreTotal = allocationRaw.reduce((sum, row) => sum + row.targetScore, 0) || 1;
-  const allocation = allocationRaw.map((row) => {
-    const targetWeight = row.targetScore / scoreTotal;
-    return {
-      ticker: row.ticker,
-      verdict: row.verdict,
-      currentWeight: row.currentWeight,
-      targetWeight,
-      targetValue: totalValue * targetWeight,
-      deltaValue: totalValue * targetWeight - totalValue * row.currentWeight,
-    };
-  });
-
-  const expectedReturn =
-    allocation.reduce((sum, row) => {
-      const pos = enrichedPositions.find((item) => item.ticker === row.ticker);
-      const baseUpside = pos?.scenarios?.base?.upsideToMarket ?? 0;
-      return sum + row.targetWeight * clamp(baseUpside, -0.5, 1);
-    }, 0) || 0;
-  const currentExpectedReturn =
-    enrichedPositions.reduce((sum, row) => sum + row.weight * clamp(row.scenarios.base.upsideToMarket ?? 0, -0.5, 1), 0) || 0;
 
   const riskFlags = [
-    ...(concentration.largest && concentration.largest.weight > 0.35
+    ...(concentration.largest && concentration.largest.weight != null && concentration.largest.weight > 0.35
       ? [
           {
             type: "concentration",
@@ -525,8 +550,144 @@ export function buildNeuroAnalysisEngine(input: {
       : []),
   ];
 
+  const integrityRecords: FinancialTraceRecord[] = [
+    financialAssumption({
+      id: financialTraceId("engine", "assumptions.horizonYears"),
+      path: "engine.assumptions.horizonYears",
+      label: "Selected forecast horizon",
+      value: horizonYears,
+      reportingPeriod: generatedAt,
+      publicationDate: generatedAt,
+      currency: "N/A",
+      units: "years",
+    }),
+    financialAssumption({
+      id: financialTraceId("engine", "assumptions.discountRatePct"),
+      path: "engine.assumptions.discountRatePct",
+      label: "Discount rate assumption",
+      value: discountRate * 100,
+      reportingPeriod: generatedAt,
+      publicationDate: generatedAt,
+      currency: "N/A",
+      units: "percent",
+    }),
+    financialAssumption({
+      id: financialTraceId("engine", "assumptions.terminalGrowthPct"),
+      path: "engine.assumptions.terminalGrowthPct",
+      label: "Terminal growth assumption",
+      value: terminalGrowth * 100,
+      reportingPeriod: generatedAt,
+      publicationDate: generatedAt,
+      currency: "N/A",
+      units: "percent",
+    }),
+  ];
+  for (const [index, position] of enrichedPositions.entries()) {
+    const scope = `${position.ticker}.position.${index}`;
+    integrityRecords.push(
+      financialFact({
+        id: financialTraceId(scope, "shares"),
+        path: `engine.positions.${index}.shares`,
+        label: `${position.ticker} shares`,
+        value: position.shares,
+        source: "User portfolio input",
+        document: "Research request holdings snapshot",
+        reportingPeriod: generatedAt,
+        publicationDate: generatedAt,
+        currency: "N/A",
+        units: "shares",
+      }),
+      financialFact({
+        id: financialTraceId(scope, "averageCost"),
+        path: `engine.positions.${index}.averageCost`,
+        label: `${position.ticker} average cost`,
+        value: position.averageCost,
+        source: "User portfolio input",
+        document: "Research request holdings snapshot",
+        reportingPeriod: generatedAt,
+        publicationDate: generatedAt,
+        currency: "USD",
+        units: "USD/share",
+      }),
+      financialCalculation({
+        id: financialTraceId(scope, "invested"),
+        path: `engine.positions.${index}.invested`,
+        label: `${position.ticker} invested cost basis`,
+        value: position.invested,
+        formula: "shares * averageCost",
+        inputs: [
+          { name: "shares", value: position.shares, traceId: financialTraceId(scope, "shares") },
+          { name: "averageCost", value: position.averageCost, traceId: financialTraceId(scope, "averageCost") },
+        ],
+        calculationTimestamp: generatedAt,
+        reportingPeriod: generatedAt,
+        currency: "USD",
+        units: "USD",
+      }),
+      financialCalculation({
+        id: financialTraceId(scope, "currentValue"),
+        path: `engine.positions.${index}.currentValue`,
+        label: `${position.ticker} current position value`,
+        value: position.currentValue,
+        formula: "shares * currentPrice",
+        inputs: [
+          { name: "shares", value: position.shares, traceId: financialTraceId(scope, "shares") },
+          { name: "currentPrice", value: position.currentPrice, traceId: financialTraceId(position.ticker, "market.regularMarketPrice") },
+        ],
+        calculationTimestamp: generatedAt,
+        reportingPeriod: generatedAt,
+        currency: "USD",
+        units: "USD",
+      }),
+      financialCalculation({
+        id: financialTraceId(scope, "pnl"),
+        path: `engine.positions.${index}.pnl`,
+        label: `${position.ticker} unrealized result`,
+        value: position.pnl,
+        formula: "currentValue - invested",
+        inputs: [
+          { name: "currentValue", value: position.currentValue, traceId: financialTraceId(scope, "currentValue") },
+          { name: "invested", value: position.invested, traceId: financialTraceId(scope, "invested") },
+        ],
+        calculationTimestamp: generatedAt,
+        reportingPeriod: generatedAt,
+        currency: "USD",
+        units: "USD",
+      })
+    );
+    for (const scenario of ["bear", "base", "bull"] as const) {
+      const scenarioValue = position.scenarios[scenario];
+      integrityRecords.push(financialCalculation({
+        id: financialTraceId(scope, `scenarios.${scenario}.intrinsicEquityValue`),
+        path: `engine.positions.${index}.scenarios.${scenario}.intrinsicEquityValue`,
+        label: `${position.ticker} ${scenario} intrinsic equity value`,
+        value: scenarioValue.intrinsicEquityValue,
+        classification: "ESTIMATE",
+        formula: "DCF(baseCashFlow, growth, discountRate, terminalGrowth, horizonYears) - totalDebt + cashAndCashEquivalents",
+        inputs: [
+          { name: "baseCashFlow", value: position.derived.baseCashFlow },
+          { name: "growth", value: scenarioValue.growth },
+          { name: "discountRate", value: discountRate },
+          { name: "terminalGrowth", value: terminalGrowth },
+          { name: "horizonYears", value: horizonYears },
+          { name: "totalDebt", value: maybeNumber(position.latestFundamentals?.totalDebt) },
+          { name: "cashAndCashEquivalents", value: maybeNumber(position.latestFundamentals?.cashAndCashEquivalents) },
+        ],
+        calculationTimestamp: generatedAt,
+        reportingPeriod: position.latestFundamentals?.year ? `FY ${position.latestFundamentals.year}` : generatedAt,
+        currency: "USD",
+        units: "USD",
+      }));
+    }
+  }
+  const financialDataIntegrity = mergeFinancialIntegrityManifests([
+    ...Object.values(marketMap).map((item) => item.financialDataIntegrity),
+    ...enrichedPositions.map((position) => position.reverseDcf.financialDataIntegrity),
+    createFinancialIntegrityManifest(integrityRecords, generatedAt),
+  ], generatedAt);
+
   return {
-    version: "2026-06-01",
+    version: "2026-09-16",
     assumptions: {
       horizonYears,
       discountRatePct: discountRate * 100,
@@ -537,24 +698,27 @@ export function buildNeuroAnalysisEngine(input: {
     portfolio: {
       totalValue,
       totalInvested,
-      totalPnl: totalValue - totalInvested,
-      totalPnlPct: totalInvested > 0 ? (totalValue - totalInvested) / totalInvested : null,
+      totalPnl: totalValue == null || totalInvested == null ? null : totalValue - totalInvested,
+      totalPnlPct: totalValue != null && totalInvested != null && totalInvested > 0 ? (totalValue - totalInvested) / totalInvested : null,
       annualizedReturn: portfolioAnnualizedReturn,
       concentration,
-      currentExpectedReturn,
-      suggestedExpectedReturn: expectedReturn,
+      currentExpectedReturn: null,
+      suggestedExpectedReturn: null,
     },
     positions: enrichedPositions,
     documentReadiness,
     allocation,
     simulation: {
-      currentExpectedReturn,
-      suggestedExpectedReturn: expectedReturn,
-      expectedReturnDelta: expectedReturn - currentExpectedReturn,
+      currentExpectedReturn: null,
+      suggestedExpectedReturn: null,
+      expectedReturnDelta: null,
       horizonYears,
-      currentProjectedValue: totalValue * Math.pow(1 + currentExpectedReturn, horizonYears),
-      suggestedProjectedValue: totalValue * Math.pow(1 + expectedReturn, horizonYears),
+      currentProjectedValue: null,
+      suggestedProjectedValue: null,
+      automaticAllocationGenerated: false,
+      stockPricePredictionGenerated: false,
     },
     riskFlags,
+    financialDataIntegrity,
   };
 }

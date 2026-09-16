@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getAuthUser } from "@/lib/authServer";
+import { requireBrokerConnectivityAccess } from "@/lib/emergencyPortfolioControls";
 import { formatSnaptradeError, snaptradeLogin } from "@/lib/snaptradeClient";
 import { ensureNeuroAnalysisSnaptradeUser } from "@/lib/snaptradeStorage";
 import { brokerConnectionsDisabledResponse } from "@/lib/serverFeatureAccess";
@@ -18,6 +19,8 @@ export async function POST(req: Request) {
 
     const smartToolsGate = await requireSmartToolsOwner(authUser);
     if (smartToolsGate) return smartToolsGate;
+    const emergencyBrokerGate = await requireBrokerConnectivityAccess();
+    if (emergencyBrokerGate) return emergencyBrokerGate;
 
     if (!areBrokerConnectionsEnabledFromEnv()) {
       return brokerConnectionsDisabledResponse();

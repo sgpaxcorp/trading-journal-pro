@@ -13,6 +13,7 @@ Neuro Trader Journal is a performance system. The core loop is: **plan → execu
 - Mobile is the companion app for existing users: sign in, review key screens, journal on the go, and receive reminders.
 
 ## How to use this guide
+- Open **Complete Manual** when you want the full explanation of every module: what it is, what it is used for, how to reach it, how to use it, and what good use looks like.
 - Start with Getting Started if you are new.
 - Use Growth Plan and Journal to build your daily operating system.
 - Use Dashboard and Analytics to verify performance and discipline.
@@ -47,6 +48,9 @@ Brings real trades into the system. Without clean data, analytics are inaccurate
 
 **Option Flows Analysis (private beta)**
 Private beta workspace for testing flow reports and premarket plans before public release.
+
+**Neuro Analysis (private investment portal)**
+Private Smart Tool for long-term stock and ETF research, company profiles, public filings, thesis tracking, portfolio review, dividend/compounding scenarios, and evidence-based AI research.
 
 **Notebook**  
 Your playbook: rules, patterns, and lessons you want to repeat.

@@ -18,12 +18,11 @@ export type AccessGrantKey =
   | "broker_sync"
   | "page_notebook"
   | "page_back_study"
-  | "page_rules_alarms"
-  | "page_forum";
+  | "page_rules_alarms";
 
 export type AccessGrantDefinition = {
   key: AccessGrantKey;
-  group: "core" | "performance" | "tools" | "community" | "addons";
+  group: "core" | "performance" | "tools" | "addons";
   label: {
     en: string;
     es: string;
@@ -213,17 +212,6 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
     },
     primaryPath: "/rules-alarms/alarms",
     paths: ["/rules-alarms/alarms", "/rules-alarms/reminders"],
-  },
-  {
-    key: "page_forum",
-    group: "community",
-    label: { en: "Forum", es: "Forum" },
-    description: {
-      en: "Community feed and discussions.",
-      es: "Feed de comunidad y discusiones.",
-    },
-    primaryPath: "/forum/community-feed",
-    paths: ["/forum"],
   },
 ];
 

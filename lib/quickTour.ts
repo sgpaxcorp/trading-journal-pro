@@ -540,8 +540,12 @@ const BUILDERS: QuickTourBuilder[] = [
       ),
       bullets: [
         L("Start with ticker, holdings, cost basis, capital, horizon, and the latest company documents.", "Empieza con ticker, posiciones, costo promedio, capital, horizonte y los reportes más recientes de la compañía."),
-        L("The system should extract business quality, financial trends, cash flows, risks, valuation ranges, and future scenarios.", "El sistema debe extraer calidad del negocio, tendencias financieras, cash flows, riesgos, rangos de valoración y escenarios futuros."),
-        L("Use the output to compare allocation choices and simulate portfolio impact before committing money.", "Usa el output para comparar decisiones de allocation y simular impacto en portfolio antes de comprometer dinero."),
+        L("Neuro first builds a price-blind, 20-dimension business-quality dossier with evidence for and against each conclusion; valuation comes second and business quality is never reduced to a score.", "Neuro primero construye un expediente de calidad del negocio de 20 dimensiones, sin ver el precio y con evidencia a favor y en contra; la valoración ocurre después y la calidad nunca se reduce a un score."),
+        L("It then reviews documented management actions, capital allocation, and guidance versus outcomes without judging personality or character.", "Luego revisa acciones documentadas de gerencia, asignación de capital y guidance versus resultados sin juzgar personalidad ni carácter."),
+        L("A third pre-valuation dossier tests multi-year earnings quality and accounting relationships with reproducible formulas. An anomaly opens a research question; it is never treated as proof of fraud.", "Un tercer expediente previo a valoración examina la calidad de ganancias y relaciones contables multianuales con fórmulas reproducibles. Una anomalía abre una pregunta de research; nunca se trata como prueba de fraude."),
+        L("Reverse DCF starts from today's market value and solves several paired growth, margin, reinvestment, tax, cost-of-capital, and terminal-growth combinations. It asks what must happen; it does not issue a buy or sell conclusion.", "Reverse DCF parte del valor de mercado de hoy y resuelve varias combinaciones de crecimiento, margen, reinversión, impuestos, costo de capital y crecimiento terminal. Pregunta qué debe ocurrir; no emite una conclusión de compra o venta."),
+        L("An independent Bear Case Agent then tries to disprove the working thesis without seeing a Bull Agent or final recommendation. Unsupported risks remain explicit evidence gaps, not invented objections.", "Luego, un Agente de Caso Bajista independiente intenta refutar la tesis de trabajo sin ver un Bull Agent ni la recomendación final. Los riesgos sin respaldo quedan como brechas explícitas de evidencia, no como objeciones inventadas."),
+        L("Move a proposal through a versioned Investment Committee Packet. AI prepares evidence; only the authenticated human can approve it.", "Pasa cada propuesta por un Investment Committee Packet versionado. AI prepara evidencia; solo la persona autenticada puede aprobarla."),
       ],
       steps: [
         {
@@ -670,34 +674,6 @@ const BUILDERS: QuickTourBuilder[] = [
           body: L(
             "This screen turns written rules into operational protection. Good controls keep one bad decision from becoming a business problem.",
             "Esta pantalla convierte reglas escritas en protección operativa. Buenos controles evitan que una mala decisión se convierta en problema empresarial."
-          ),
-          selector: "main h1",
-        },
-      ],
-    }),
-  },
-  {
-    key: "forum",
-    guideHref: "/help/forum",
-    match: (path) => path.startsWith("/forum"),
-    build: (L) => ({
-      title: L("Trader Entrepreneur Community", "Comunidad Trader Entrepreneur"),
-      summary: L(
-        "The community is for evidence-backed discussion, progress, lessons, and feedback. Use it to improve process without outsourcing conviction.",
-        "La comunidad es para discusión con evidencia, progreso, lecciones y feedback. Úsala para mejorar proceso sin tercerizar convicción."
-      ),
-      bullets: [
-        L("Share context, data, and what decision you are trying to improve.", "Comparte contexto, data y qué decisión estás tratando de mejorar."),
-        L("Use feedback to refine the business plan, playbook, and review process.", "Usa feedback para refinar el plan empresarial, playbook y proceso de review."),
-        L("Keep your documented process as the primary source of truth.", "Mantén tu proceso documentado como fuente principal de verdad."),
-      ],
-      steps: [
-        {
-          id: "forum-header",
-          title: L("Community with context", "Comunidad con contexto"),
-          body: L(
-            "Strong posts explain the setup, evidence, decision, and lesson. The goal is better operators, not louder opinions.",
-            "Publicaciones fuertes explican setup, evidencia, decisión y lección. La meta es mejores operadores, no opiniones más ruidosas."
           ),
           selector: "main h1",
         },

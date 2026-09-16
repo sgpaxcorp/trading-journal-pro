@@ -9,20 +9,21 @@
 
 La plataforma tiene una base defensiva mejor que la de una aplicacion promedio en etapa previa a lanzamiento: verifica tokens en el servidor, mantiene secretos privilegiados fuera del cliente, usa firma de webhooks de Stripe, aplica rate limiting compartido, cifra credenciales de brokers, protege buckets y entrega headers de seguridad en produccion.
 
-Sin embargo, **no recomiendo abrir la plataforma a una audiencia amplia hasta corregir SEC-01 y SEC-02**. Ambos son problemas de autorizacion, el tipo de vulnerabilidad que puede saltarse controles visuales aunque la interfaz parezca cerrada:
+La revision inicial encontro dos bloqueos altos de autorizacion. Ambos quedaron **remediados en codigo y migraciones pendientes de deployment**:
 
 1. Un usuario autenticado puede modificar campos sensibles de su propio perfil. Esos campos participan en el acceso a planes y en operaciones de facturacion, creando una via de elevacion de privilegios y un posible IDOR de Stripe.
-2. Los hilos del foro que la interfaz presenta como privados pueden consultarse de forma anonima directamente desde la API de Supabase.
+2. El foro fue retirado por completo y una migracion elimina sus tablas y permisos desplegados.
 
 ### Distribucion de hallazgos
 
 | Severidad | Cantidad | Criterio |
 |---|---:|---|
-| Alta | 2 | Deben bloquear el lanzamiento publico |
+| Alta abierta | 0 | Sin hallazgos altos abiertos en el codigo actual |
+| Alta remediada | 2 | Requieren aplicar y verificar las migraciones en produccion |
 | Media | 9 | Deben corregirse antes de escalar o procesar datos sensibles en volumen |
 | Baja | 5 | Defensa en profundidad y reduccion de superficie |
 
-**Veredicto:** buena base tecnica, pero aun no apta para escalar a 20,000 usuarios sin la primera ola de remediacion. La prioridad no es anadir mas controles visuales, sino hacer que la base de datos y el servidor sean la autoridad exclusiva para identidad, plan, facturacion y acceso.
+**Veredicto actualizado:** la primera ola de remediacion fue implementada. Para un piloto de hasta 1,000 suscriptores, el codigo pasa las validaciones de autoridad de acceso, jobs durables, idempotencia, monitoreo y controles de emergencia. La aprobacion final depende de aplicar migraciones, configurar alertas/crons y ejecutar smoke tests en el deployment.
 
 ## 2. Metodologia
 
@@ -54,7 +55,7 @@ Los principales limites que deben considerarse en cada cambio son:
 
 **Severidad:** Alta  
 **Confianza:** Alta  
-**Estado:** Confirmado por codigo y politica SQL
+**Estado:** Remediado en codigo; pendiente de aplicar/verificar migracion `20260915000600_entitlement_authority_hardening.sql`
 
 **Ubicaciones principales:**
 
@@ -68,7 +69,7 @@ Los principales limites que deben considerarse en cada cambio son:
 - `app/api/stripe/subscription/cancel/route.ts:58`
 - `app/api/account/delete/route.ts:158`
 
-**Evidencia:** la politica permite que un usuario autenticado actualice su propia fila completa en `profiles`, sin privilegios por columna. Esa fila contiene estado/plan y tambien IDs de Stripe. El servidor acepta datos del perfil como fallback de autorizacion y varias rutas de facturacion consumen `stripe_customer_id` o `stripe_subscription_id` desde ese perfil.
+**Remediacion implementada:** `user_entitlements` es ahora la autoridad de plan y billing; se elimino el fallback de `profiles`; un trigger bloquea cambios de campos administrados por servidor; se revoca mutacion directa de entitlements; y las rutas de Stripe verifican customer/subscription contra la identidad autenticada.
 
 **Impacto:**
 
@@ -92,15 +93,9 @@ Los principales limites que deben considerarse en cada cambio son:
 
 **Severidad:** Alta  
 **Confianza:** Alta  
-**Estado:** Confirmado mediante lectura anonima no destructiva
+**Estado:** Remediado por retiro total; pendiente de aplicar/verificar migracion `20260915000500_remove_forum.sql`
 
-**Ubicaciones principales:**
-
-- `app/(private)/forum/community-feed/page.tsx:526`
-- `lib/forumSupabase.ts:76`
-- `lib/forumSupabase.ts:144`
-
-**Evidencia:** la interfaz identifica la comunidad como privada para usuarios autenticados, pero no se encontro una migracion RLS para `forum_threads`/`forum_posts`. Una consulta REST anonima en produccion respondio `200` y devolvio una fila con titulo, cuerpo, autor y `user_id`.
+**Remediacion implementada:** se eliminaron rutas, componentes, helpers, permisos, manuales, seeds y referencias de navegacion del foro. La migracion forward-only elimina funciones y tablas desplegadas. La prueba pgTAP confirma que `forum_threads` y `forum_posts` no existen despues de migrar.
 
 **Impacto:** un tercero puede enumerar o extraer contenido generado por usuarios y sus identificadores sin iniciar sesion. El foro tampoco presenta mecanismos completos de reportar contenido o bloquear usuarios, lo que aumenta riesgo de abuso y moderacion.
 

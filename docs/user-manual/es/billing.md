@@ -14,6 +14,15 @@ Billing se gestiona en la web. La app móvil no crea cuentas, no cambia suscripc
 6. Programar la cancelación de la suscripción.
 7. Abrir el historial de pagos.
 
+## Acuerdos de primera suscripción
+Antes del primer checkout seguro, el usuario debe confirmar tres acuerdos requeridos:
+
+1. Que leyó y acepta los `Términos y Condiciones` vigentes.
+2. Que leyó y acepta la `Política de Privacidad` vigente.
+3. Que entiende el trial, la renovación automática, la política prepago sin reembolso, el uso educativo y la divulgación de resultados no garantizados.
+
+El botón de checkout permanece deshabilitado hasta que todos los acuerdos requeridos estén seleccionados. El backend también valida las versiones vigentes antes de crear una sesión de checkout de Stripe, así que saltarse la UI no evita el requisito de aceptación.
+
 ## Estado de Option Flow
 `Option Flows Analysis` está actualmente en beta privada. No está disponible para compra ni activación directa desde Billing.
 

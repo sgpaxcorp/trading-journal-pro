@@ -5,11 +5,13 @@ import {
   AlertCircle,
   BarChart3,
   BriefcaseBusiness,
+  CalendarClock,
   CheckCircle2,
   ChevronRight,
   CloudDownload,
   Download,
   ExternalLink,
+  FileWarning,
   FileText,
   History,
   Loader2,
@@ -18,10 +20,12 @@ import {
   RefreshCw,
   Save,
   Search,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Trash2,
   UploadCloud,
+  LockKeyhole,
 } from "lucide-react";
 import {
   Bar,
@@ -37,19 +41,79 @@ import {
 } from "recharts";
 
 import TopNav from "@/app/components/TopNav";
+import PortfolioExposureMapPanel from "@/app/(private)/neuro-analysis/PortfolioExposureMapPanel";
+import MacroContextPanel from "@/app/(private)/neuro-analysis/MacroContextPanel";
+import CapitalAllocationDashboardPanel from "@/app/(private)/neuro-analysis/CapitalAllocationDashboardPanel";
+import PerformanceAttributionPanel from "@/app/(private)/neuro-analysis/PerformanceAttributionPanel";
+import CapitalAccountsPanel from "@/app/(private)/neuro-analysis/CapitalAccountsPanel";
+import DailyInvestmentOfficePanel from "@/app/(private)/neuro-analysis/DailyInvestmentOfficePanel";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import {
+  BUSINESS_QUALITY_DIMENSIONS,
+  type BusinessQualityAnalysis,
+  type BusinessQualityDimensionKey,
+  type BusinessQualityEvidence,
+} from "@/lib/neuroBusinessQuality";
+import {
+  MANAGEMENT_ACTION_CATEGORIES,
+  type ManagementActionCategoryKey,
+  type ManagementCapitalAllocationAnalysis,
+} from "@/lib/neuroManagementCapitalAllocation";
+import {
+  EARNINGS_QUALITY_AREAS,
+  type EarningsQualityAccountingRiskAnalysis,
+  type EarningsQualityAreaKey,
+  type EarningsQualityTrendPoint,
+} from "@/lib/neuroEarningsQuality";
+import {
+  BEAR_CASE_AREAS,
+  type BearCaseAreaKey,
+  type IndependentBearCaseAnalysis,
+} from "@/lib/neuroBearCase";
+import {
+  COMMITTEE_DECISIONS,
+  COMMITTEE_SECTION_KEYS,
+  type CommitteeClaimClassification,
+  type CommitteeDecision,
+  type CommitteeSource,
+  type InvestmentCommitteePacket,
+} from "@/lib/neuroInvestmentCommittee";
+import type {
+  InvestmentThesisReview,
+  OriginalInvestmentThesisRecord,
+} from "@/lib/neuroInvestmentThesis";
+import type {
+  PositionExitReason,
+  PositionExitReview,
+} from "@/lib/neuroPositionExitReview";
+import type { PortfolioExposureMap } from "@/lib/neuroPortfolioExposure";
+import type { MacroContextReport } from "@/lib/neuroMacroContext";
+import type { CapitalAllocationDashboard } from "@/lib/neuroCapitalAllocation";
+import type { PerformanceAttributionReport } from "@/lib/neuroPerformanceAttribution";
+import {
+  DATA_NOT_AVAILABLE,
+  type FinancialDataIntegrityManifest,
+} from "@/lib/neuroFinancialDataIntegrity";
+import {
+  buildNeuroDecisionSupport,
+  normalizeNeuroInvestmentPolicy,
+  starterNeuroInvestmentPolicy,
+  type NeuroDecisionState,
+  type NeuroDecisionSupport,
+  type NeuroInvestmentPolicy,
+} from "@/lib/neuroInvestmentGovernance";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 type Lang = "en" | "es";
-type WorkspaceTab = "research" | "screener" | "fund_plan";
+type WorkspaceTab = "daily_office" | "research" | "committee" | "screener" | "fund_plan";
 
 type Holding = {
   id: string;
   ticker: string;
   shares: number;
-  averageCost: number;
-  currentPrice: number;
+  averageCost: number | null;
+  currentPrice: number | null;
   openedAt?: string;
 };
 
@@ -130,11 +194,31 @@ type MarketData = {
   } | null;
   annualFundamentals: Array<{
     year: number;
+    reportingPeriod?: string | null;
+    publicationDate?: string | null;
+    sourceName?: string | null;
+    sourceDocument?: string | null;
+    currency?: string | null;
     totalRevenue?: number | null;
     operatingIncome?: number | null;
     netIncome?: number | null;
     operatingCashFlow?: number | null;
     freeCashFlow?: number | null;
+    capitalExpenditures?: number | null;
+    accountsReceivable?: number | null;
+    inventory?: number | null;
+    goodwillAndIntangibleAssets?: number | null;
+    stockBasedCompensation?: number | null;
+    dilutedAverageShares?: number | null;
+    deferredRevenue?: number | null;
+    deferredTaxAssets?: number | null;
+    deferredTaxLiabilities?: number | null;
+    netDeferredTaxes?: number | null;
+    changeInWorkingCapital?: number | null;
+    totalAssets?: number | null;
+    pretaxIncome?: number | null;
+    incomeTaxExpense?: number | null;
+    cashAndCashEquivalents?: number | null;
     dilutedEPS?: number | null;
     totalDebt?: number | null;
     stockholdersEquity?: number | null;
@@ -151,7 +235,9 @@ type MarketData = {
     priceSource?: string | null;
     fundamentalsSource?: string | null;
     messages?: string[];
+    fetchedAt?: string;
   };
+  financialDataIntegrity?: FinancialDataIntegrityManifest;
   errors?: Record<string, string | null>;
 };
 
@@ -210,13 +296,18 @@ type SectorScreenerRow = {
   operatingMargin?: number | null;
   fcfMargin?: number | null;
   debtToEquity?: number | null;
-  fiveYearReturn?: number | null;
-  valueScore: number;
-  qualityScore: number;
-  dividendScore: number;
-  momentumScore: number;
-  potentialScore: number;
-  verdict: string;
+  status: "PASSED_ALL_REQUIRED_CRITERIA" | "FAILED_REQUIRED_CRITERIA" | "INSUFFICIENT_DATA";
+  passed: boolean;
+  dataCompletenessPct: number;
+  criteria: Array<{
+    key: string;
+    label: string;
+    status: "PASS" | "FAIL" | "DATA_NOT_AVAILABLE";
+    explanation: string;
+  }>;
+  missingMetrics: string[];
+  failedCriteria: string[];
+  noMagicScore: true;
   dataWarnings?: string[];
 };
 
@@ -224,6 +315,9 @@ type SectorScreenerResult = {
   sector: string;
   sectorLabel: string;
   sectors: Array<{ key: string; label: string }>;
+  strategy: string;
+  template: { key: string; name: string };
+  templates: Array<{ key: string; name: string }>;
   summary: Record<string, any>;
   rows: SectorScreenerRow[];
   generatedAt?: string;
@@ -242,6 +336,103 @@ type ThesisNote = {
     happenedAt?: string;
     evidenceLevel?: string;
   };
+};
+
+type InvestmentCommitteePacketRecord = {
+  id: string;
+  case_id: string;
+  report_id?: string | null;
+  policy_id?: string | null;
+  ticker: string;
+  version: number;
+  generation_status: "ready" | "incomplete";
+  packet: InvestmentCommitteePacket;
+  source_manifest: CommitteeSource[];
+  content_hash: string;
+  generated_by: "ai_research" | "deterministic_fallback";
+  evidence_snapshot?: {
+    businessQualityAnalysis?: BusinessQualityAnalysis | null;
+    managementCapitalAllocationAnalysis?: ManagementCapitalAllocationAnalysis | null;
+    earningsQualityAccountingRiskAnalysis?: EarningsQualityAccountingRiskAnalysis | null;
+    independentBearCaseAnalysis?: IndependentBearCaseAnalysis | null;
+    macroContext?: MacroContextReport | null;
+    performanceAttribution?: PerformanceAttributionReport | null;
+    requiresFilings?: boolean;
+  };
+  report_snapshot?: {
+    structured?: {
+      businessQualityAnalysis?: BusinessQualityAnalysis | null;
+      managementCapitalAllocationAnalysis?: ManagementCapitalAllocationAnalysis | null;
+      earningsQualityAccountingRiskAnalysis?: EarningsQualityAccountingRiskAnalysis | null;
+      independentBearCaseAnalysis?: IndependentBearCaseAnalysis | null;
+      macroContext?: MacroContextReport | null;
+      performanceAttribution?: PerformanceAttributionReport | null;
+    };
+  };
+  created_at: string;
+};
+
+type InvestmentCommitteeDecisionRecord = {
+  id: string;
+  case_id: string;
+  packet_id: string;
+  packet_version: number;
+  ticker: string;
+  decision: CommitteeDecision;
+  rationale: string;
+  conditions?: string | null;
+  decision_maker_email?: string | null;
+  authorization_basis: string;
+  portfolio_eligible: boolean;
+  decided_at: string;
+};
+
+type InvestmentThesisReviewRecord = {
+  id: string;
+  original_thesis_id: string;
+  report_id?: string | null;
+  ticker: string;
+  classification: InvestmentThesisReview["classification"];
+  summary: string;
+  changes: InvestmentThesisReview["changes"];
+  classification_evidence: InvestmentThesisReview["classificationEvidence"];
+  missing_evidence: string[];
+  comparison_snapshot?: { review?: InvestmentThesisReview };
+  generated_by: InvestmentThesisReview["generatedBy"];
+  created_at: string;
+};
+
+type PositionExitReviewRecord = {
+  id: string;
+  original_thesis_id: string;
+  report_id?: string | null;
+  ticker: string;
+  review_status: PositionExitReview["status"];
+  primary_reason: PositionExitReview["primaryReason"];
+  secondary_reasons: PositionExitReview["secondaryReasons"];
+  summary: string;
+  what_changed: PositionExitReview["whatChanged"];
+  comparisons: PositionExitReview["comparisons"];
+  classification_evidence: PositionExitReview["classificationEvidence"];
+  missing_evidence: string[];
+  price_movement_assessment: PositionExitReview["priceMovementAssessment"];
+  comparison_snapshot?: { review?: PositionExitReview };
+  generated_by: PositionExitReview["generatedBy"];
+  created_at: string;
+};
+
+type InvestmentPolicyDraft = {
+  universe: string;
+  strategy: string;
+  horizonYears: string;
+  baseCurrency: string;
+  benchmark: string;
+  restrictions: string;
+  liquidityNeeds: string;
+  maxPositionPct: string;
+  maxSectorPct: string;
+  minCashPct: string;
+  allowedInstruments: string;
 };
 
 type FundShareholder = {
@@ -283,8 +474,8 @@ const BENCHMARK_TICKER = "SPY";
 
 function defaultResearchGoal(isEs: boolean) {
   return isEs
-    ? "Analiza objetivamente esta acción o ETF como inversión a largo plazo y posible posición de dividendos. Si es acción, evalúa perfil del negocio, moat, competencia, calidad de earnings, free cash flow, seguridad del dividendo, documentos necesarios, valoración hoy y fair value proyectado de 2 a 10 años. Si es ETF, evalúa estrategia, holdings, concentración, costo, yield, liquidez, tracking risk y rol dentro de una tesis de largo plazo. Dime si el profile debe añadirse, esperar, mantenerse, aumentarse, reducirse o entrar en revisión de salida."
-    : "Objectively analyze this stock or ETF as a long-term investment and possible dividend holding. If it is a stock, evaluate business profile, moat, competition, earnings quality, free cash flow, dividend safety, required documents, valuation today, and projected fair value from years 2 through 10. If it is an ETF, evaluate strategy, holdings, concentration, cost, yield, liquidity, tracking risk, and role inside a long-term thesis. Tell me whether the profile should be added, waited on, held, increased, reduced, or moved into exit review.";
+    ? "Analiza objetivamente esta acción o ETF como inversión a largo plazo. Si es acción, evalúa el negocio antes del precio, moat, competencia, calidad de ganancias, free cash flow, seguridad del dividendo, documentos necesarios, valoración actual, Reverse DCF, Caso Bajista Independiente y escenarios de fair value de 2 a 10 años. Si es ETF, evalúa estrategia, holdings, concentración, costo, yield, liquidez, tracking risk y rol dentro de la cartera. Presenta evidencia favorable y contradictoria, incertidumbre, brechas de información y si el research debe quedar en NO HACER NADA, MANTENER EFECTIVO, NECESITA MÁS INFORMACIÓN, TESIS INCIERTA o avanzar a revisión humana autorizada. No predigas el precio ni emitas una orden de trading."
+    : "Objectively analyze this stock or ETF as a long-term investment. For a stock, evaluate the business before price, moat, competition, earnings quality, free cash flow, dividend safety, required documents, current valuation, Reverse DCF, an Independent Bear Case, and 2-to-10-year fair-value scenarios. For an ETF, evaluate strategy, holdings, concentration, cost, yield, liquidity, tracking risk, and portfolio role. Present supporting and contradictory evidence, uncertainty, information gaps, and whether research should remain at DO NOTHING, KEEP CASH, NEED MORE INFORMATION, THESIS UNCERTAIN, or advance to authorized human review. Do not predict the stock price or issue a trade instruction.";
 }
 
 function isLegacyResearchGoal(value: string) {
@@ -292,7 +483,9 @@ function isLegacyResearchGoal(value: string) {
   return (
     (text.includes("capital") && text.includes("well allocated")) ||
     (text.includes("capital") && text.includes("allocation")) ||
-    (text.includes("capital") && text.includes("asignado"))
+    (text.includes("capital") && text.includes("asignado")) ||
+    (text.includes("possible dividend holding") && text.includes("tell me whether")) ||
+    (text.includes("posible posición de dividendos") && text.includes("dime si"))
   );
 }
 
@@ -307,6 +500,13 @@ function toNumber(value: unknown) {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+}
+
+function optionalNumber(value: unknown) {
+  if (value === null || value === undefined || typeof value === "boolean") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const parsed = typeof value === "string" ? Number(value.replace(/[,$\s]/g, "")) : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function isFundLikeMarketData(item?: MarketData | null) {
@@ -329,8 +529,8 @@ function pickFirst(...values: unknown[]) {
 }
 
 function formatCurrency(value: number | null | undefined, localeTag: string) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return "-";
+  const parsed = optionalNumber(value);
+  if (parsed == null) return DATA_NOT_AVAILABLE;
   return new Intl.NumberFormat(localeTag, {
     style: "currency",
     currency: "USD",
@@ -339,8 +539,8 @@ function formatCurrency(value: number | null | undefined, localeTag: string) {
 }
 
 function formatCompactCurrency(value: number | null | undefined, localeTag: string) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return "-";
+  const parsed = optionalNumber(value);
+  if (parsed == null) return DATA_NOT_AVAILABLE;
   return new Intl.NumberFormat(localeTag, {
     style: "currency",
     currency: "USD",
@@ -349,18 +549,82 @@ function formatCompactCurrency(value: number | null | undefined, localeTag: stri
   }).format(parsed);
 }
 
+function formatDocumentedAmount(
+  value: number | null | undefined,
+  currency: string | null | undefined,
+  localeTag: string
+) {
+  const parsed = optionalNumber(value);
+  if (parsed == null) return DATA_NOT_AVAILABLE;
+  const normalizedCurrency = /^[A-Z]{3}$/.test(String(currency ?? "").toUpperCase())
+    ? String(currency).toUpperCase()
+    : "USD";
+  return new Intl.NumberFormat(localeTag, {
+    style: "currency",
+    currency: normalizedCurrency,
+    notation: Math.abs(parsed) >= 1_000_000 ? "compact" : "standard",
+    maximumFractionDigits: Math.abs(parsed) >= 1000 ? 1 : 2,
+  }).format(parsed);
+}
+
 function formatPercent(value: number | null | undefined, localeTag: string) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return "-";
+  const parsed = optionalNumber(value);
+  if (parsed == null) return DATA_NOT_AVAILABLE;
   return new Intl.NumberFormat(localeTag, {
     style: "percent",
     maximumFractionDigits: 1,
   }).format(parsed);
 }
 
+function formatPercentPoints(value: number | null | undefined, localeTag: string) {
+  const parsed = optionalNumber(value);
+  if (parsed == null) return DATA_NOT_AVAILABLE;
+  return new Intl.NumberFormat(localeTag, {
+    style: "percent",
+    maximumFractionDigits: 1,
+  }).format(parsed / 100);
+}
+
+function reverseDcfCellTone(value: number | null | undefined) {
+  if (value == null) return "border-slate-800 bg-slate-950/40 text-slate-500";
+  const gap = Math.abs(Number(value));
+  if (!Number.isFinite(gap)) return "border-slate-800 bg-slate-950/40 text-slate-500";
+  if (gap <= 0.05) return "border-sky-400/50 bg-sky-400/10 text-sky-100";
+  if (gap <= 0.25) return "border-slate-700 bg-slate-900/75 text-slate-200";
+  return "border-slate-800 bg-slate-950/55 text-slate-400";
+}
+
+function reverseDcfScenarioLabel(id: string, language: Lang) {
+  const labels: Record<string, Record<Lang, string>> = {
+    historical_economics: { en: "Historical economics", es: "Economía histórica" },
+    margin_execution: { en: "Margin execution", es: "Ejecución de margen" },
+    capital_efficient: { en: "Capital-efficient growth", es: "Crecimiento eficiente en capital" },
+    reinvestment_heavy: { en: "Reinvestment-heavy growth", es: "Crecimiento con alta reinversión" },
+    higher_hurdle: { en: "Higher return hurdle", es: "Mayor tasa requerida" },
+    lower_terminal_support: { en: "Lower terminal support", es: "Menor apoyo terminal" },
+  };
+  return labels[id]?.[language] ?? id.replace(/_/g, " ");
+}
+
+function formatAccountingMetric(value: number | null | undefined, localeTag: string) {
+  const parsed = optionalNumber(value);
+  if (parsed == null) return DATA_NOT_AVAILABLE;
+  return new Intl.NumberFormat(localeTag, {
+    notation: Math.abs(parsed) >= 1_000_000 ? "compact" : "standard",
+    maximumFractionDigits: Math.abs(parsed) >= 1_000 ? 1 : 2,
+  }).format(parsed);
+}
+
+function formatAccountingRelationship(point: EarningsQualityTrendPoint, localeTag: string) {
+  if (point.calculatedValue == null) return DATA_NOT_AVAILABLE;
+  if (point.calculation === "growth_spread") return formatPercent(point.calculatedValue, localeTag);
+  if (point.calculation === "ratio") return `${point.calculatedValue.toFixed(2)}x`;
+  return formatAccountingMetric(point.calculatedValue, localeTag);
+}
+
 function formatCompactNumber(value: number | null | undefined, localeTag: string) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return "-";
+  const parsed = optionalNumber(value);
+  if (parsed == null) return DATA_NOT_AVAILABLE;
   return new Intl.NumberFormat(localeTag, {
     notation: "compact",
     maximumFractionDigits: 1,
@@ -496,7 +760,12 @@ function oneYearAgoInputDate() {
   return date.toISOString().slice(0, 10);
 }
 
-function makeHolding(ticker = "", shares = 0, averageCost = 0, currentPrice = 0): Holding {
+function makeHolding(
+  ticker = "",
+  shares = 0,
+  averageCost: number | null = null,
+  currentPrice: number | null = null
+): Holding {
   return {
     id: makeId(ticker || "position"),
     ticker,
@@ -507,13 +776,60 @@ function makeHolding(ticker = "", shares = 0, averageCost = 0, currentPrice = 0)
   };
 }
 
+function listToText(value: unknown) {
+  if (Array.isArray(value)) return value.map((item) => String(item ?? "").trim()).filter(Boolean).join("\n");
+  return String(value ?? "").trim();
+}
+
+function textToList(value: string) {
+  return value
+    .split(/\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function policyToDraft(policy: NeuroInvestmentPolicy): InvestmentPolicyDraft {
+  return {
+    universe: policy.universe,
+    strategy: policy.strategy,
+    horizonYears: policy.horizonYears == null ? "" : String(policy.horizonYears),
+    baseCurrency: policy.baseCurrency || "USD",
+    benchmark: policy.benchmark,
+    restrictions: listToText(policy.restrictions),
+    liquidityNeeds: policy.liquidityNeeds,
+    maxPositionPct: policy.limits.maxPositionPct == null ? "" : String(policy.limits.maxPositionPct),
+    maxSectorPct: policy.limits.maxSectorPct == null ? "" : String(policy.limits.maxSectorPct),
+    minCashPct: policy.limits.minCashPct == null ? "" : String(policy.limits.minCashPct),
+    allowedInstruments: listToText(policy.limits.allowedInstruments),
+  };
+}
+
+function draftToPolicy(draft: InvestmentPolicyDraft, status: NeuroInvestmentPolicy["status"]): NeuroInvestmentPolicy {
+  return normalizeNeuroInvestmentPolicy({
+    status,
+    universe: draft.universe,
+    strategy: draft.strategy,
+    horizonYears: toNumber(draft.horizonYears),
+    baseCurrency: draft.baseCurrency,
+    benchmark: draft.benchmark,
+    restrictions: textToList(draft.restrictions),
+    liquidityNeeds: draft.liquidityNeeds,
+    limits: {
+      maxPositionPct: toNumber(draft.maxPositionPct),
+      maxSectorPct: toNumber(draft.maxSectorPct),
+      minCashPct: toNumber(draft.minCashPct),
+      allowedInstruments: textToList(draft.allowedInstruments),
+    },
+  });
+}
+
 const INITIAL_PORTFOLIO_HOLDINGS: Holding[] = [
   {
     id: "position-aapl-initial",
     ticker: "AAPL",
     shares: 0,
-    averageCost: 0,
-    currentPrice: 0,
+    averageCost: null,
+    currentPrice: null,
     openedAt: "",
   },
 ];
@@ -526,9 +842,9 @@ function daysSince(value?: string | null) {
   return days;
 }
 
-function annualizedReturn(currentValue: number, invested: number, openedAt?: string | null) {
+function annualizedReturn(currentValue: number | null, invested: number | null, openedAt?: string | null) {
   const days = daysSince(openedAt);
-  if (!days || days < 30 || currentValue <= 0 || invested <= 0) return null;
+  if (!days || days < 30 || currentValue == null || invested == null || currentValue <= 0 || invested <= 0) return null;
   const value = Math.pow(currentValue / invested, 365 / days) - 1;
   return Number.isFinite(value) ? value : null;
 }
@@ -541,6 +857,210 @@ function Readout({ label, value, hint }: { label: string; value: string | number
       {hint ? <p className="mt-1 truncate text-xs text-slate-500">{hint}</p> : null}
     </div>
   );
+}
+
+function FinancialIntegrityPanel({
+  manifest,
+  isEs,
+}: {
+  manifest?: FinancialDataIntegrityManifest | null;
+  isEs: boolean;
+}) {
+  const records = manifest?.records ?? [];
+  const available = records.filter((record) => record.status !== "unavailable").length;
+  const unavailable = records.length - available;
+  return (
+    <section className="border-y border-emerald-400/20 bg-emerald-400/[0.025] px-4 py-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
+          <div>
+            <p className="text-xs font-bold uppercase text-emerald-300">
+              {isEs ? "Integridad de datos financieros" : "Financial data integrity"}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
+              {isEs
+                ? "Las cifras verificadas conservan su fuente completa. Un dato sin evidencia se muestra como DATA NOT AVAILABLE y nunca como cero."
+                : "Verified figures retain complete provenance. Unsupported data is shown as DATA NOT AVAILABLE and never as zero."}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 gap-4 text-xs">
+          <span className="text-emerald-200">{available} {isEs ? "trazables" : "traceable"}</span>
+          <span className="text-amber-200">{unavailable} {isEs ? "no disponibles" : "unavailable"}</span>
+        </div>
+      </div>
+      {records.length ? (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs font-semibold text-sky-200">
+            {isEs ? "Ver ledger de fuentes y cálculos" : "View source and calculation ledger"}
+          </summary>
+          <div className="mt-3 overflow-x-auto border-t border-slate-800 pt-3">
+            <table className="min-w-[1320px] w-full text-left text-[11px] leading-4">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="px-2 py-2">{isEs ? "Dato" : "Data"}</th>
+                  <th className="px-2 py-2">{isEs ? "Valor" : "Value"}</th>
+                  <th className="px-2 py-2">{isEs ? "Clase" : "Class"}</th>
+                  <th className="px-2 py-2">Status</th>
+                  <th className="px-2 py-2">{isEs ? "Fuente" : "Source"}</th>
+                  <th className="px-2 py-2">{isEs ? "Documento" : "Document"}</th>
+                  <th className="px-2 py-2">{isEs ? "Período" : "Period"}</th>
+                  <th className="px-2 py-2">{isEs ? "Publicado" : "Published"}</th>
+                  <th className="px-2 py-2">{isEs ? "Moneda / unidad" : "Currency / units"}</th>
+                  <th className="px-2 py-2">{isEs ? "Fórmula / inputs / cálculo" : "Formula / inputs / calculation"}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800 text-slate-300">
+                {records.map((record) => (
+                  <tr key={record.id}>
+                    <td className="max-w-[240px] px-2 py-2 font-medium text-slate-100">
+                      {record.label}
+                      <p className="mt-1 break-all font-mono text-[9px] font-normal text-slate-600">{record.id}</p>
+                    </td>
+                    <td className="px-2 py-2 font-mono text-slate-200">{record.displayValue}</td>
+                    <td className="px-2 py-2">{record.classification}</td>
+                    <td className={record.status === "unavailable" ? "px-2 py-2 text-amber-200" : "px-2 py-2 text-emerald-200"}>
+                      {record.status === "unavailable" ? DATA_NOT_AVAILABLE : record.status.toUpperCase()}
+                    </td>
+                    <td className="max-w-[170px] px-2 py-2">{record.source}</td>
+                    <td className="max-w-[180px] px-2 py-2">{record.document}</td>
+                    <td className="px-2 py-2">{record.reportingPeriod}</td>
+                    <td className="px-2 py-2">{record.publicationDate}</td>
+                    <td className="px-2 py-2">{record.currency} / {record.units}</td>
+                    <td className="max-w-[300px] px-2 py-2">
+                      <p>{record.formula ?? (isEs ? "Dato directo" : "Direct fact")}</p>
+                      {record.inputs.length ? (
+                        <p className="mt-1 text-slate-500">
+                          {record.inputs.map((input) => `${input.name}=${input.value ?? DATA_NOT_AVAILABLE}`).join("; ")}
+                        </p>
+                      ) : null}
+                      {record.calculationTimestamp ? (
+                        <p className="mt-1 font-mono text-[9px] text-slate-600">{record.calculationTimestamp}</p>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      ) : (
+        <p className="mt-3 text-xs font-semibold text-amber-200">{DATA_NOT_AVAILABLE}</p>
+      )}
+    </section>
+  );
+}
+
+function committeeClassificationTone(classification: CommitteeClaimClassification) {
+  if (classification === "FACT") return "border-emerald-400/40 bg-emerald-400/10 text-emerald-200";
+  if (classification === "CALCULATION") return "border-sky-400/40 bg-sky-400/10 text-sky-200";
+  if (classification === "ASSUMPTION") return "border-amber-400/40 bg-amber-400/10 text-amber-200";
+  if (classification === "ESTIMATE") return "border-violet-400/40 bg-violet-400/10 text-violet-200";
+  if (classification === "USER_DECISION") return "border-cyan-300/50 bg-cyan-300/10 text-cyan-100";
+  return "border-fuchsia-400/35 bg-fuchsia-400/10 text-fuchsia-100";
+}
+
+function committeeDecisionTone(decision?: CommitteeDecision | null) {
+  if (decision === "APPROVED") return "border-emerald-400/50 bg-emerald-400/10 text-emerald-100";
+  if (decision === "REJECTED") return "border-rose-400/50 bg-rose-400/10 text-rose-100";
+  if (decision === "WATCHLIST") return "border-sky-400/50 bg-sky-400/10 text-sky-100";
+  if (decision === "NEEDS_MORE_RESEARCH") return "border-amber-400/50 bg-amber-400/10 text-amber-100";
+  return "border-slate-700 bg-slate-950/50 text-slate-300";
+}
+
+function thesisClassificationTone(classification?: InvestmentThesisReview["classification"] | null) {
+  if (classification === "THESIS_STRENGTHENED") return "border-emerald-400/50 bg-emerald-400/10 text-emerald-100";
+  if (classification === "THESIS_UNCHANGED") return "border-sky-400/50 bg-sky-400/10 text-sky-100";
+  if (classification === "THESIS_WEAKENED") return "border-amber-400/50 bg-amber-400/10 text-amber-100";
+  if (classification === "THESIS_INVALIDATED") return "border-rose-400/50 bg-rose-400/10 text-rose-100";
+  return "border-slate-600 bg-slate-950/60 text-slate-200";
+}
+
+function positionExitStatusTone(status?: PositionExitReview["status"] | null) {
+  if (status === "DOCUMENTED_CHANGE_REQUIRES_HUMAN_REVIEW") {
+    return "border-amber-400/50 bg-amber-400/10 text-amber-100";
+  }
+  if (status === "NO_DOCUMENTED_CHANGE") return "border-emerald-400/50 bg-emerald-400/10 text-emerald-100";
+  return "border-slate-600 bg-slate-950/60 text-slate-200";
+}
+
+function positionExitReasonLabel(reason: PositionExitReason | null | undefined, isEs: boolean) {
+  const labels: Record<PositionExitReason, [string, string]> = {
+    FUNDAMENTAL_DETERIORATION: ["Fundamental deterioration", "Deterioro fundamental"],
+    ORIGINAL_THESIS_INVALIDATED: ["Original thesis invalidated", "Tesis original invalidada"],
+    VALUATION_MATERIALLY_CHANGED: ["Valuation materially changed", "Valoración cambió materialmente"],
+    BETTER_CAPITAL_ALLOCATION_OPPORTUNITY: ["Better capital allocation opportunity", "Mejor oportunidad para asignar capital"],
+    PORTFOLIO_RISK_CONSTRAINT: ["Portfolio risk constraint", "Restricción de riesgo de cartera"],
+    LIQUIDITY_REQUIREMENT: ["Liquidity requirement", "Necesidad de liquidez"],
+    TAX_CONSIDERATION: ["Tax consideration", "Consideración fiscal"],
+    CORPORATE_EVENT: ["Corporate event", "Evento corporativo"],
+    ORIGINAL_ANALYSIS_ERROR: ["Original analysis error", "Error en el análisis original"],
+    OTHER_DOCUMENTED_REASON: ["Other documented reason", "Otro motivo documentado"],
+  };
+  if (!reason) return isEs ? "Ningún motivo verificado" : "No verified reason";
+  return labels[reason][isEs ? 1 : 0];
+}
+
+function thesisReviewFromRecord(
+  record: InvestmentThesisReviewRecord | null | undefined,
+  originalThesis: OriginalInvestmentThesisRecord | null
+): InvestmentThesisReview | null {
+  if (!record) return null;
+  if (record.comparison_snapshot?.review) return record.comparison_snapshot.review;
+  return {
+    schemaVersion: "1.0",
+    originalThesisId: record.original_thesis_id,
+    originalThesisContentHash: originalThesis?.content_hash ?? "",
+    ticker: record.ticker,
+    language: "en",
+    classification: record.classification,
+    summary: record.summary,
+    changes: record.changes ?? [],
+    classificationEvidence: record.classification_evidence ?? [],
+    missingEvidence: record.missing_evidence ?? [],
+    comparisonPeriod: {
+      originalFrozenAt: originalThesis?.created_at ?? record.created_at,
+      currentAsOf: record.created_at,
+    },
+    generatedAt: record.created_at,
+    generatedBy: record.generated_by,
+    originalThesisPreserved: true,
+    automaticTradingDecision: false,
+  };
+}
+
+function positionExitReviewFromRecord(
+  record: PositionExitReviewRecord | null | undefined,
+  originalThesis: OriginalInvestmentThesisRecord | null
+): PositionExitReview | null {
+  if (!record) return null;
+  if (record.comparison_snapshot?.review) return record.comparison_snapshot.review;
+  return {
+    schemaVersion: "1.0",
+    originalThesisId: record.original_thesis_id,
+    originalThesisContentHash: originalThesis?.content_hash ?? "",
+    ticker: record.ticker,
+    language: "en",
+    status: record.review_status,
+    primaryReason: record.primary_reason,
+    secondaryReasons: record.secondary_reasons ?? [],
+    summary: record.summary,
+    whatChanged: record.what_changed ?? [],
+    comparisons: record.comparisons ?? [],
+    classificationEvidence: record.classification_evidence ?? [],
+    missingEvidence: record.missing_evidence ?? [],
+    priceMovementAssessment: record.price_movement_assessment,
+    comparisonPeriod: {
+      originalFrozenAt: originalThesis?.created_at ?? record.created_at,
+      currentAsOf: record.created_at,
+    },
+    generatedAt: record.created_at,
+    generatedBy: record.generated_by,
+    originalThesisPreserved: true,
+    automaticTradingDecision: false,
+    humanDecisionRequired: true,
+  };
 }
 
 function StatusItem({
@@ -588,12 +1108,175 @@ function ScoreBar({ label, score, hint }: { label: string; score: number; hint?:
   );
 }
 
+function BusinessEvidenceList({ rows }: { rows: BusinessQualityEvidence[] }) {
+  return (
+    <div className="space-y-2">
+      {rows.map((row, index) => (
+        <div key={`${row.statement}-${index}`} className="border-l border-slate-700 pl-3">
+          <p className={row.status === "identified" ? "text-xs leading-5 text-slate-300" : "text-xs leading-5 text-slate-500"}>
+            {row.statement}
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[10px] uppercase text-slate-600">
+            <span>{row.sourceLabel}</span>
+            {row.sourceDate ? <span>{row.sourceDate}</span> : null}
+            {row.sourceUrl ? (
+              <a
+                href={row.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-sky-400 hover:text-sky-300"
+              >
+                Source <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            ) : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function NeuroAnalysisPage() {
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale) as Lang;
   const isEs = lang === "es";
   const localeTag = LOCALE_TAG[lang];
   const L = (en: string, es: string) => (isEs ? es : en);
+  const decisionStateLabel = (state: NeuroDecisionState | string | null | undefined) => {
+    switch (state) {
+      case "propose":
+        return L("PROPOSE", "PROPONER");
+      case "observe":
+        return L("OBSERVE", "OBSERVAR");
+      case "reject":
+        return L("REJECT", "RECHAZAR");
+      case "insufficient_information":
+        return L("INSUFFICIENT INFORMATION", "INFORMACION INSUFICIENTE");
+      default:
+        return L("INVESTIGATE", "INVESTIGAR");
+    }
+  };
+  const decisionStateTone = (state: NeuroDecisionState | string | null | undefined) => {
+    if (state === "propose") return "border-emerald-400/45 bg-emerald-400/10 text-emerald-100";
+    if (state === "reject") return "border-rose-400/45 bg-rose-400/10 text-rose-100";
+    if (state === "insufficient_information") return "border-amber-400/45 bg-amber-400/10 text-amber-100";
+    if (state === "observe") return "border-sky-400/45 bg-sky-400/10 text-sky-100";
+    return "border-violet-400/45 bg-violet-400/10 text-violet-100";
+  };
+  const systemDispositionLabel = (code?: string | null) => {
+    switch (code) {
+      case "KEEP_CASH":
+        return L("KEEP CASH", "MANTENER EFECTIVO");
+      case "NEED_MORE_INFORMATION":
+        return L("NEED MORE INFORMATION", "NECESITA MAS INFORMACION");
+      case "THESIS_UNCERTAIN":
+        return L("THESIS UNCERTAIN", "TESIS INCIERTA");
+      case "DO_NOTHING":
+        return L("DO NOTHING", "NO HACER NADA");
+      default:
+        return "-";
+    }
+  };
+  const systemDispositionTone = (code?: string | null) => {
+    if (code === "KEEP_CASH") return "border-cyan-400/45 bg-cyan-400/10 text-cyan-100";
+    if (code === "NEED_MORE_INFORMATION") return "border-amber-400/45 bg-amber-400/10 text-amber-100";
+    if (code === "THESIS_UNCERTAIN") return "border-violet-400/45 bg-violet-400/10 text-violet-100";
+    return "border-slate-600 bg-slate-950/50 text-slate-200";
+  };
+  const committeeSectionLabels: Record<(typeof COMMITTEE_SECTION_KEYS)[number], string> = {
+    executiveSummary: L("Executive summary", "Resumen ejecutivo"),
+    investmentThesis: L("Investment thesis", "Tesis de inversión"),
+    currentMarketPrice: L("Current market price", "Precio actual de mercado"),
+    intrinsicValueRange: L("Estimated intrinsic value range", "Rango de valor intrínseco estimado"),
+    expectedReturnAssumptions: L("Expected return assumptions", "Supuestos de retorno esperado"),
+    downsideScenario: L("Downside scenario", "Escenario bajista"),
+    keyFinancialMetrics: L("Key financial metrics", "Métricas financieras clave"),
+    balanceSheetAnalysis: L("Balance sheet analysis", "Análisis del balance"),
+    competitivePosition: L("Competitive position", "Posición competitiva"),
+    catalysts: L("Catalysts", "Catalizadores"),
+    principalRisks: L("Principal risks", "Riesgos principales"),
+    contradictingEvidence: L("Evidence contradicting the thesis", "Evidencia que contradice la tesis"),
+    portfolioImpact: L("Portfolio impact", "Impacto en la cartera"),
+    positionSizeProposal: L("Position-size proposal", "Propuesta de tamaño de posición"),
+    invalidationConditions: L("Thesis invalidation conditions", "Condiciones que invalidan la tesis"),
+  };
+  const businessQualityLabels: Record<BusinessQualityDimensionKey, string> = {
+    businessModel: L("Business model", "Modelo de negocio"),
+    revenueSources: L("Revenue sources", "Fuentes de ingresos"),
+    revenuePredictability: L("Revenue predictability", "Predictibilidad de ingresos"),
+    pricingPower: L("Pricing power", "Poder de precios"),
+    customerConcentration: L("Customer concentration", "Concentración de clientes"),
+    supplierConcentration: L("Supplier concentration", "Concentración de suplidores"),
+    competitiveAdvantages: L("Competitive advantages", "Ventajas competitivas"),
+    barriersToEntry: L("Barriers to entry", "Barreras de entrada"),
+    marketStructure: L("Market structure", "Estructura de mercado"),
+    capitalIntensity: L("Capital intensity", "Intensidad de capital"),
+    returnOnInvestedCapital: L("Return on invested capital", "Retorno sobre capital invertido"),
+    freeCashFlowGeneration: L("Free cash flow generation", "Generación de flujo de caja libre"),
+    debtRequirements: L("Debt requirements", "Necesidad de deuda"),
+    acquisitionDependency: L("Acquisition dependency", "Dependencia de adquisiciones"),
+    shareDilution: L("Share dilution", "Dilución de acciones"),
+    managementCapitalAllocation: L("Management capital allocation", "Asignación de capital por la gerencia"),
+    cyclicality: L("Cyclicality", "Ciclicidad"),
+    regulatoryExposure: L("Regulatory exposure", "Exposición regulatoria"),
+    technologyDisruptionRisk: L("Technology disruption risk", "Riesgo de disrupción tecnológica"),
+    longTermReinvestmentOpportunities: L("Long-term reinvestment opportunities", "Oportunidades de reinversión a largo plazo"),
+  };
+  const managementCategoryLabels: Record<ManagementActionCategoryKey, string> = {
+    historicalAcquisitions: L("Historical acquisitions", "Adquisiciones históricas"),
+    divestitures: L("Divestitures", "Desinversiones"),
+    shareRepurchases: L("Share repurchases", "Recompras de acciones"),
+    shareIssuance: L("Share issuance", "Emisión de acciones"),
+    dividends: L("Dividends", "Dividendos"),
+    debtIssuanceRepayment: L("Debt issuance and repayment", "Emisión y repago de deuda"),
+    capitalExpenditures: L("Capital expenditures", "Gastos de capital"),
+    researchDevelopment: L("R&D investment", "Inversión en R&D"),
+    executiveCompensation: L("Executive compensation", "Compensación ejecutiva"),
+    insiderOwnership: L("Insider ownership", "Participación de insiders"),
+    relatedPartyTransactions: L("Related-party transactions", "Transacciones con partes relacionadas"),
+    accountingPolicyChanges: L("Changes in accounting policies", "Cambios en políticas contables"),
+    guidanceVsResults: L("Guidance versus subsequent results", "Guidance versus resultados posteriores"),
+  };
+  const earningsQualityLabels: Record<EarningsQualityAreaKey, string> = {
+    netIncomeVsOperatingCashFlow: L("Net income vs operating cash flow", "Ingreso neto vs flujo operativo"),
+    freeCashFlowVsReportedEarnings: L("Free cash flow vs reported earnings", "Flujo libre vs ganancias reportadas"),
+    accountsReceivableVsRevenue: L("Receivables vs revenue", "Cuentas por cobrar vs ingresos"),
+    inventoryVsRevenue: L("Inventory vs revenue", "Inventario vs ingresos"),
+    capitalExpenditures: L("Capital expenditures", "Gastos de capital"),
+    capitalizedExpenses: L("Capitalized expenses", "Gastos capitalizados"),
+    goodwillAndIntangibleAssets: L("Goodwill and intangible assets", "Goodwill y activos intangibles"),
+    acquisitionAccounting: L("Acquisition accounting", "Contabilidad de adquisiciones"),
+    stockBasedCompensation: L("Stock-based compensation", "Compensación basada en acciones"),
+    shareDilution: L("Share dilution", "Dilución de acciones"),
+    oneTimeAdjustments: L("One-time adjustments", "Ajustes no recurrentes"),
+    nonGaapAdjustments: L("Non-GAAP adjustments", "Ajustes non-GAAP"),
+    restructuringCharges: L("Restructuring charges", "Cargos de reestructuración"),
+    deferredRevenue: L("Deferred revenue", "Ingresos diferidos"),
+    deferredTaxes: L("Deferred taxes", "Impuestos diferidos"),
+    changesInWorkingCapital: L("Changes in working capital", "Cambios en capital de trabajo"),
+    relatedPartyTransactions: L("Related-party transactions", "Transacciones con partes relacionadas"),
+    auditorChanges: L("Auditor changes", "Cambios de auditor"),
+    restatements: L("Restatements", "Reexpresiones financieras"),
+    accountingEstimateChanges: L("Changes in accounting estimates", "Cambios en estimados contables"),
+  };
+  const bearCaseLabels: Record<BearCaseAreaKey, string> = {
+    competitiveThreats: L("Competitive threats", "Amenazas competitivas"),
+    marginCompression: L("Margin compression", "Compresión de márgenes"),
+    customerLosses: L("Customer losses", "Pérdida de clientes"),
+    debtRefinancing: L("Debt refinancing", "Refinanciamiento de deuda"),
+    technologicalDisruption: L("Technological disruption", "Disrupción tecnológica"),
+    regulation: L("Regulation", "Regulación"),
+    managementExecution: L("Management execution", "Ejecución de la gerencia"),
+    capitalRequirements: L("Capital requirements", "Necesidades de capital"),
+    dilution: L("Dilution", "Dilución"),
+    commodityExposure: L("Commodity exposure", "Exposición a commodities"),
+    currencyExposure: L("Currency exposure", "Exposición cambiaria"),
+    cyclicality: L("Cyclicality", "Ciclicidad"),
+    accountingConcerns: L("Accounting concerns", "Alertas contables"),
+    valuationAssumptions: L("Valuation assumptions", "Supuestos de valoración"),
+    industryDeterioration: L("Industry deterioration", "Deterioro de la industria"),
+    alternativeExplanations: L("Alternative explanations", "Explicaciones alternativas"),
+  };
 
   const [focusTicker, setFocusTicker] = useState("AAPL");
   const [focusTickerDraft, setFocusTickerDraft] = useState("AAPL");
@@ -608,6 +1291,17 @@ export default function NeuroAnalysisPage() {
   const [accessAllowed, setAccessAllowed] = useState<boolean | null>(null);
   const [agentReport, setAgentReport] = useState("");
   const [engineSnapshot, setEngineSnapshot] = useState<any | null>(null);
+  const [reportFinancialDataIntegrity, setReportFinancialDataIntegrity] = useState<FinancialDataIntegrityManifest | null>(null);
+  const [businessQualityAnalysis, setBusinessQualityAnalysis] = useState<BusinessQualityAnalysis | null>(null);
+  const [managementCapitalAllocationAnalysis, setManagementCapitalAllocationAnalysis] = useState<ManagementCapitalAllocationAnalysis | null>(null);
+  const [earningsQualityAccountingRiskAnalysis, setEarningsQualityAccountingRiskAnalysis] = useState<EarningsQualityAccountingRiskAnalysis | null>(null);
+  const [independentBearCaseAnalysis, setIndependentBearCaseAnalysis] = useState<IndependentBearCaseAnalysis | null>(null);
+  const [portfolioExposureMap, setPortfolioExposureMap] = useState<PortfolioExposureMap | null>(null);
+  const [macroContext, setMacroContext] = useState<MacroContextReport | null>(null);
+  const [capitalAllocationDashboard, setCapitalAllocationDashboard] = useState<CapitalAllocationDashboard | null>(null);
+  const [performanceAttribution, setPerformanceAttribution] = useState<PerformanceAttributionReport | null>(null);
+  const [performanceAttributionLoading, setPerformanceAttributionLoading] = useState(false);
+  const [performanceAttributionError, setPerformanceAttributionError] = useState("");
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [activeReportId, setActiveReportId] = useState<string | null>(null);
   const [caseTitle, setCaseTitle] = useState("");
@@ -618,13 +1312,15 @@ export default function NeuroAnalysisPage() {
   const [agentError, setAgentError] = useState("");
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentElapsedSeconds, setAgentElapsedSeconds] = useState(0);
+  const [autoRunLoading, setAutoRunLoading] = useState(false);
+  const [autoRunStatus, setAutoRunStatus] = useState("");
   const [documentLookup, setDocumentLookup] = useState<CompanyDocumentLookup[]>([]);
   const [documentLookupLoading, setDocumentLookupLoading] = useState(false);
   const [documentLookupError, setDocumentLookupError] = useState("");
   const [documentImporting, setDocumentImporting] = useState<Record<string, boolean>>({});
   const [documentBatchImporting, setDocumentBatchImporting] = useState(false);
   const [documentImportError, setDocumentImportError] = useState("");
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("research");
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("daily_office");
   const [agentQuestion, setAgentQuestion] = useState("");
   const [agentQaLoading, setAgentQaLoading] = useState(false);
   const [agentQaError, setAgentQaError] = useState("");
@@ -637,7 +1333,39 @@ export default function NeuroAnalysisPage() {
   const [thesisSaving, setThesisSaving] = useState(false);
   const [thesisStatus, setThesisStatus] = useState("");
   const [thesisError, setThesisError] = useState("");
+  const [investmentPolicy, setInvestmentPolicy] = useState<NeuroInvestmentPolicy | null>(null);
+  const [policyDraft, setPolicyDraft] = useState<InvestmentPolicyDraft>(() => policyToDraft(starterNeuroInvestmentPolicy()));
+  const [policyLoading, setPolicyLoading] = useState(false);
+  const [policySaving, setPolicySaving] = useState(false);
+  const [policyStatus, setPolicyStatus] = useState("");
+  const [policyError, setPolicyError] = useState("");
+  const [serverDecisionSupport, setServerDecisionSupport] = useState<NeuroDecisionSupport | null>(null);
+  const [committeePackets, setCommitteePackets] = useState<InvestmentCommitteePacketRecord[]>([]);
+  const [committeeDecisions, setCommitteeDecisions] = useState<InvestmentCommitteeDecisionRecord[]>([]);
+  const [selectedCommitteePacketId, setSelectedCommitteePacketId] = useState<string | null>(null);
+  const [committeeLoading, setCommitteeLoading] = useState(false);
+  const [committeeGenerating, setCommitteeGenerating] = useState(false);
+  const [committeeSavingDecision, setCommitteeSavingDecision] = useState(false);
+  const [committeeStatus, setCommitteeStatus] = useState("");
+  const [committeeError, setCommitteeError] = useState("");
+  const [committeeDecision, setCommitteeDecision] = useState<CommitteeDecision>("NEEDS_MORE_RESEARCH");
+  const [committeeRationale, setCommitteeRationale] = useState("");
+  const [committeeConditions, setCommitteeConditions] = useState("");
+  const [committeeHumanConfirmed, setCommitteeHumanConfirmed] = useState(false);
+  const [originalInvestmentThesis, setOriginalInvestmentThesis] = useState<OriginalInvestmentThesisRecord | null>(null);
+  const [investmentThesisReview, setInvestmentThesisReview] = useState<InvestmentThesisReview | null>(null);
+  const [investmentThesisReviewHistory, setInvestmentThesisReviewHistory] = useState<InvestmentThesisReviewRecord[]>([]);
+  const [positionExitReview, setPositionExitReview] = useState<PositionExitReview | null>(null);
+  const [positionExitReviewHistory, setPositionExitReviewHistory] = useState<PositionExitReviewRecord[]>([]);
+  const [thesisPurchaseDate, setThesisPurchaseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [thesisPurchasePrice, setThesisPurchasePrice] = useState("");
+  const [thesisPortfolioWeightPct, setThesisPortfolioWeightPct] = useState("");
+  const [thesisFreezeConfirmed, setThesisFreezeConfirmed] = useState(false);
+  const [thesisFreezeLoading, setThesisFreezeLoading] = useState(false);
+  const [thesisFreezeStatus, setThesisFreezeStatus] = useState("");
+  const [thesisFreezeError, setThesisFreezeError] = useState("");
   const [screenerSector, setScreenerSector] = useState("technology");
+  const [screenerStrategy, setScreenerStrategy] = useState("value_candidate");
   const [screenerCustomTickers, setScreenerCustomTickers] = useState("");
   const [screenerLoading, setScreenerLoading] = useState(false);
   const [screenerError, setScreenerError] = useState("");
@@ -647,6 +1375,7 @@ export default function NeuroAnalysisPage() {
   const [fundAnnualReturnPct, setFundAnnualReturnPct] = useState(10);
   const [fundSelectedYear, setFundSelectedYear] = useState(10);
   const [portfolioHoldings, setPortfolioHoldings] = useState<Holding[]>(INITIAL_PORTFOLIO_HOLDINGS);
+  const [availableCapital, setAvailableCapital] = useState<number | null>(null);
   const [fundShareholders, setFundShareholders] = useState<FundShareholder[]>([
     {
       id: "shareholder-founder",
@@ -681,6 +1410,17 @@ export default function NeuroAnalysisPage() {
     setDocumentLookup([]);
     setDocumentLookupError("");
     setDocumentImportError("");
+    setAutoRunStatus("");
+    setServerDecisionSupport(null);
+    setBusinessQualityAnalysis(null);
+    setManagementCapitalAllocationAnalysis(null);
+    setEarningsQualityAccountingRiskAnalysis(null);
+    setIndependentBearCaseAnalysis(null);
+    setPortfolioExposureMap(null);
+    setMacroContext(null);
+    setCapitalAllocationDashboard(null);
+    setPerformanceAttribution(null);
+    setPerformanceAttributionError("");
   }, [focusTicker]);
 
   const authToken = async () => {
@@ -700,6 +1440,264 @@ export default function NeuroAnalysisPage() {
     });
   }
 
+  async function waitForNeuroJob(jobId: string, timeoutMs = 240_000) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const res = await authedFetch("/api/neuro-analysis/jobs");
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Could not check document processing.");
+      const job = (Array.isArray(json?.jobs) ? json.jobs : []).find(
+        (item: any) => String(item?.id ?? "") === jobId
+      );
+      if (job?.status === "succeeded") return job.result ?? {};
+      if (job?.status === "failed" || job?.status === "cancelled") {
+        throw new Error(String(job?.error || "Document processing failed."));
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+    }
+    throw new Error(
+      L(
+        "Document processing is still running. It will remain queued safely; refresh this company shortly.",
+        "El documento sigue procesándose. Permanecerá en cola de forma segura; refresca esta compañía en breve."
+      )
+    );
+  }
+
+  async function loadInvestmentPolicy() {
+    try {
+      setPolicyLoading(true);
+      setPolicyError("");
+      const res = await authedFetch("/api/neuro-analysis/policy");
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Could not load investment policy.");
+      const policy = normalizeNeuroInvestmentPolicy(json?.policy ?? starterNeuroInvestmentPolicy());
+      setInvestmentPolicy(policy);
+      setPolicyDraft(policyToDraft(policy));
+    } catch (error: any) {
+      setPolicyError(error?.message || "Could not load investment policy.");
+    } finally {
+      setPolicyLoading(false);
+    }
+  }
+
+  async function saveInvestmentPolicy(approve: boolean) {
+    try {
+      setPolicySaving(true);
+      setPolicyStatus("");
+      setPolicyError("");
+      const policy = draftToPolicy(policyDraft, approve ? "active" : "draft");
+      const res = await authedFetch("/api/neuro-analysis/policy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ policy, approve }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Could not save investment policy.");
+      const saved = normalizeNeuroInvestmentPolicy(json?.policy ?? policy);
+      setInvestmentPolicy(saved);
+      setPolicyDraft(policyToDraft(saved));
+      setPolicyStatus(approve ? L("Policy approved.", "Política aprobada.") : L("Policy draft saved.", "Draft de política guardado."));
+    } catch (error: any) {
+      setPolicyError(error?.message || "Could not save investment policy.");
+    } finally {
+      setPolicySaving(false);
+    }
+  }
+
+  async function loadInvestmentCommittee(caseId: string | null = activeCaseId) {
+    if (!caseId) {
+      setCommitteePackets([]);
+      setCommitteeDecisions([]);
+      setSelectedCommitteePacketId(null);
+      setOriginalInvestmentThesis(null);
+      setInvestmentThesisReview(null);
+      setInvestmentThesisReviewHistory([]);
+      setPositionExitReview(null);
+      setPositionExitReviewHistory([]);
+      return;
+    }
+    try {
+      setCommitteeLoading(true);
+      setCommitteeError("");
+      const [res, thesisRes] = await Promise.all([
+        authedFetch(`/api/neuro-analysis/committee-packets?caseId=${encodeURIComponent(caseId)}`),
+        authedFetch(`/api/neuro-analysis/investment-theses?caseId=${encodeURIComponent(caseId)}`),
+      ]);
+      const [json, thesisJson] = await Promise.all([
+        res.json().catch(() => ({})),
+        thesisRes.json().catch(() => ({})),
+      ]);
+      if (!res.ok) throw new Error(json?.error || "Could not load Investment Committee packets.");
+      if (!thesisRes.ok) throw new Error(thesisJson?.error || "Could not load the permanent investment thesis.");
+      const packets = Array.isArray(json?.packets) ? json.packets : [];
+      const original = (thesisJson?.originalThesis ?? null) as OriginalInvestmentThesisRecord | null;
+      const reviews = (Array.isArray(thesisJson?.reviews) ? thesisJson.reviews : []) as InvestmentThesisReviewRecord[];
+      const exitReviews = (
+        Array.isArray(thesisJson?.positionExitReviews) ? thesisJson.positionExitReviews : []
+      ) as PositionExitReviewRecord[];
+      setCommitteePackets(packets);
+      setCommitteeDecisions(Array.isArray(json?.decisions) ? json.decisions : []);
+      setOriginalInvestmentThesis(original);
+      setInvestmentThesisReviewHistory(reviews);
+      setInvestmentThesisReview(thesisReviewFromRecord(reviews[0], original));
+      setPositionExitReviewHistory(exitReviews);
+      setPositionExitReview(positionExitReviewFromRecord(exitReviews[0], original));
+      setSelectedCommitteePacketId((current) =>
+        current && packets.some((packet: InvestmentCommitteePacketRecord) => packet.id === current)
+          ? current
+          : packets[0]?.id ?? null
+      );
+    } catch (error: any) {
+      setCommitteeError(error?.message || "Could not load Investment Committee packets.");
+    } finally {
+      setCommitteeLoading(false);
+    }
+  }
+
+  async function createInvestmentCommitteePacket() {
+    try {
+      setCommitteeGenerating(true);
+      setCommitteeStatus("");
+      setCommitteeError("");
+      if (!activeCaseId || !activeReportId) {
+        throw new Error(
+          L(
+            "Run and save a research report before creating a committee packet.",
+            "Corre y guarda un reporte antes de crear el packet del comité."
+          )
+        );
+      }
+      const res = await authedFetch("/api/neuro-analysis/committee-packets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caseId: activeCaseId, reportId: activeReportId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Could not create the Investment Committee packet.");
+      const packets = Array.isArray(json?.packets) ? json.packets : [];
+      setCommitteePackets(packets);
+      setCommitteeDecisions(Array.isArray(json?.decisions) ? json.decisions : []);
+      setSelectedCommitteePacketId(String(json?.packet?.id ?? packets[0]?.id ?? "") || null);
+      setCommitteeStatus(
+        L(
+          `Committee packet v${Number(json?.packet?.version ?? packets[0]?.version ?? 1)} is ready for human review.`,
+          `El packet v${Number(json?.packet?.version ?? packets[0]?.version ?? 1)} está listo para revisión humana.`
+        )
+      );
+      setActiveWorkspaceTab("committee");
+    } catch (error: any) {
+      setCommitteeError(error?.message || "Could not create the Investment Committee packet.");
+    } finally {
+      setCommitteeGenerating(false);
+    }
+  }
+
+  async function recordInvestmentCommitteeDecision() {
+    try {
+      setCommitteeSavingDecision(true);
+      setCommitteeStatus("");
+      setCommitteeError("");
+      if (!selectedCommitteePacketId) {
+        throw new Error(L("Select a committee packet first.", "Selecciona un packet del comité primero."));
+      }
+      if (!committeeHumanConfirmed) {
+        throw new Error(
+          L(
+            "Confirm that this is your human committee decision.",
+            "Confirma que esta es tu decisión humana del comité."
+          )
+        );
+      }
+      const res = await authedFetch("/api/neuro-analysis/committee-decisions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          packetId: selectedCommitteePacketId,
+          decision: committeeDecision,
+          rationale: committeeRationale,
+          conditions: committeeConditions,
+          humanConfirmation: "HUMAN_COMMITTEE_DECISION",
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Could not record the Investment Committee decision.");
+      setCommitteeDecisions(Array.isArray(json?.decisions) ? json.decisions : []);
+      setCommitteeRationale("");
+      setCommitteeConditions("");
+      setCommitteeHumanConfirmed(false);
+      setCommitteeStatus(
+        committeeDecision === "APPROVED"
+          ? L(
+              "Human approval recorded. This packet version is now eligible for a manually created portfolio position.",
+              "Aprobación humana registrada. Esta versión ahora es elegible para una posición creada manualmente."
+            )
+          : L("Human committee decision recorded.", "Decisión humana del comité registrada.")
+      );
+      if (committeeDecision === "APPROVED") {
+        const price = optionalNumber(marketData?.market?.regularMarketPrice ?? marketData?.market?.previousClose);
+        if (price != null && price > 0) setThesisPurchasePrice(price.toFixed(2));
+        const activePosition = portfolioPositions.find((position) => position.ticker === focusTicker);
+        const activeWeight = optionalNumber(activePosition?.weight);
+        if (activeWeight != null && activeWeight > 0) setThesisPortfolioWeightPct((activeWeight * 100).toFixed(2));
+      }
+    } catch (error: any) {
+      setCommitteeError(error?.message || "Could not record the Investment Committee decision.");
+    } finally {
+      setCommitteeSavingDecision(false);
+    }
+  }
+
+  async function freezeOriginalInvestmentThesis() {
+    try {
+      setThesisFreezeLoading(true);
+      setThesisFreezeStatus("");
+      setThesisFreezeError("");
+      const approvedDecision = committeeDecisions.find(
+        (decision) => decision.packet_id === selectedCommitteePacketId && decision.decision === "APPROVED"
+      );
+      if (!approvedDecision) {
+        throw new Error(L("Select an APPROVED packet first.", "Selecciona primero un packet APROBADO."));
+      }
+      if (!thesisFreezeConfirmed) {
+        throw new Error(
+          L(
+            "Confirm that these are the real purchase details and that the original thesis will be permanent.",
+            "Confirma que estos son los datos reales de compra y que la tesis original será permanente."
+          )
+        );
+      }
+      const res = await authedFetch("/api/neuro-analysis/investment-theses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decisionId: approvedDecision.id,
+          purchaseDate: thesisPurchaseDate,
+          purchasePrice: Number(thesisPurchasePrice),
+          portfolioWeightPct: Number(thesisPortfolioWeightPct),
+          confirmation: "FREEZE_ORIGINAL_THESIS",
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Could not freeze the original investment thesis.");
+      setOriginalInvestmentThesis(json?.originalThesis ?? null);
+      setInvestmentThesisReview(null);
+      setInvestmentThesisReviewHistory([]);
+      setPositionExitReview(null);
+      setPositionExitReviewHistory([]);
+      setThesisFreezeConfirmed(false);
+      setThesisFreezeStatus(
+        L(
+          "Purchase recorded. The original investment thesis is now permanent.",
+          "Compra registrada. La tesis original de inversión ahora es permanente."
+        )
+      );
+    } catch (error: any) {
+      setThesisFreezeError(error?.message || "Could not freeze the original investment thesis.");
+    } finally {
+      setThesisFreezeLoading(false);
+    }
+  }
+
   async function loadThesisContext(caseId: string | null = activeCaseId) {
     if (!caseId) {
       setThesisNotes([]);
@@ -715,9 +1713,18 @@ export default function NeuroAnalysisPage() {
   useEffect(() => {
     if (!activeCaseId) {
       setThesisNotes([]);
+      setCommitteePackets([]);
+      setCommitteeDecisions([]);
+      setSelectedCommitteePacketId(null);
+      setOriginalInvestmentThesis(null);
+      setInvestmentThesisReview(null);
+      setInvestmentThesisReviewHistory([]);
+      setPositionExitReview(null);
+      setPositionExitReviewHistory([]);
       return;
     }
     void loadThesisContext(activeCaseId);
+    void loadInvestmentCommittee(activeCaseId);
   }, [activeCaseId]);
 
   const fundProjection = useMemo(
@@ -749,14 +1756,15 @@ export default function NeuroAnalysisPage() {
         if (!ticker) return null;
         const marketItem = marketDataByTicker[ticker];
         const currentPrice =
-          toNumber(marketItem?.market?.regularMarketPrice) ||
-          toNumber(marketItem?.market?.previousClose) ||
-          toNumber(holding.currentPrice);
+          optionalNumber(marketItem?.market?.regularMarketPrice) ??
+          optionalNumber(marketItem?.market?.previousClose) ??
+          optionalNumber(holding.currentPrice);
         const shares = Math.max(0, toNumber(holding.shares));
-        const averageCost = Math.max(0, toNumber(holding.averageCost));
-        const invested = shares * averageCost;
-        const value = shares * currentPrice;
-        const pnl = value - invested;
+        const parsedAverageCost = optionalNumber(holding.averageCost);
+        const averageCost = parsedAverageCost == null ? null : Math.max(0, parsedAverageCost);
+        const invested = averageCost == null ? null : shares * averageCost;
+        const value = currentPrice == null ? null : shares * currentPrice;
+        const pnl = value == null || invested == null ? null : value - invested;
         const annualized = annualizedReturn(value, invested, holding.openedAt);
         return {
           ...holding,
@@ -767,7 +1775,7 @@ export default function NeuroAnalysisPage() {
           invested,
           value,
           pnl,
-          pnlPct: invested > 0 ? pnl / invested : null,
+          pnlPct: invested != null && invested > 0 && pnl != null ? pnl / invested : null,
           annualizedReturn: annualized,
           dividendYield: marketItem?.fund?.yield ?? marketItem?.market?.dividendYield ?? null,
           companyName: marketItem?.company?.shortName || marketItem?.company?.name || ticker,
@@ -776,9 +1784,9 @@ export default function NeuroAnalysisPage() {
       })
       .filter(Boolean) as Array<
       Holding & {
-        invested: number;
-        value: number;
-        pnl: number;
+        invested: number | null;
+        value: number | null;
+        pnl: number | null;
         pnlPct: number | null;
         annualizedReturn: number | null;
         dividendYield: number | null;
@@ -786,49 +1794,85 @@ export default function NeuroAnalysisPage() {
         sector: string | null;
       }
     >;
-    const totalValue = rows.reduce((sum, row) => sum + row.value, 0);
+    const totalValue = rows.some((row) => row.value == null)
+      ? null
+      : rows.reduce((sum, row) => sum + Number(row.value), 0);
     return rows.map((row) => ({
       ...row,
-      weight: totalValue > 0 ? row.value / totalValue : null,
+      weight: totalValue != null && totalValue > 0 && row.value != null ? row.value / totalValue : null,
     }));
   }, [marketDataByTicker, portfolioHoldings]);
   const portfolioSummary = useMemo(() => {
     const activeRows = portfolioPositions.filter((row) => row.shares > 0 && row.ticker);
-    const totalValue = activeRows.reduce((sum, row) => sum + row.value, 0);
-    const totalInvested = activeRows.reduce((sum, row) => sum + row.invested, 0);
-    const totalPnl = totalValue - totalInvested;
+    const totalValue = activeRows.some((row) => row.value == null)
+      ? null
+      : activeRows.reduce((sum, row) => sum + Number(row.value), 0);
+    const totalInvested = activeRows.some((row) => row.invested == null)
+      ? null
+      : activeRows.reduce((sum, row) => sum + Number(row.invested), 0);
+    const totalPnl = totalValue == null || totalInvested == null ? null : totalValue - totalInvested;
     const annualizedWeightBase = activeRows.reduce(
-      (sum, row) => sum + (row.annualizedReturn != null ? row.invested : 0),
+      (sum, row) => sum + (row.annualizedReturn != null && row.invested != null ? row.invested : 0),
       0
     );
     const annualized =
       annualizedWeightBase > 0
         ? activeRows.reduce(
-            (sum, row) => sum + (row.annualizedReturn != null ? row.annualizedReturn * row.invested : 0),
+            (sum, row) => sum + (row.annualizedReturn != null && row.invested != null ? row.annualizedReturn * row.invested : 0),
             0
           ) / annualizedWeightBase
         : null;
+    const incomeInputsComplete = activeRows.every(
+      (row) => row.value != null && optionalNumber(row.dividendYield) != null
+    );
     const incomeYield =
-      totalValue > 0
-        ? activeRows.reduce((sum, row) => sum + row.value * (toNumber(row.dividendYield) || 0), 0) / totalValue
+      incomeInputsComplete && totalValue != null && totalValue > 0
+        ? activeRows.reduce(
+            (sum, row) => sum + Number(row.value) * Number(optionalNumber(row.dividendYield)),
+            0
+          ) / totalValue
         : null;
+    const valuedRows = activeRows.filter((row) => row.value != null);
     return {
       count: activeRows.length,
       totalValue,
       totalInvested,
       totalPnl,
-      totalPnlPct: totalInvested > 0 ? totalPnl / totalInvested : null,
+      totalPnlPct: totalInvested != null && totalInvested > 0 && totalPnl != null ? totalPnl / totalInvested : null,
       annualizedReturn: annualized,
       incomeYield,
-      largestPosition: activeRows
+      largestPosition: valuedRows
         .slice()
-        .sort((a, b) => b.value - a.value)[0] ?? null,
+        .sort((a, b) => Number(b.value) - Number(a.value))[0] ?? null,
     };
   }, [portfolioPositions]);
   const researchHoldings = useMemo(() => {
+    const ticker = focusTicker.trim().toUpperCase();
+    const price =
+      optionalNumber(marketData?.market?.regularMarketPrice) ??
+      optionalNumber(marketData?.market?.previousClose) ??
+      optionalNumber(marketDataByTicker[ticker]?.market?.regularMarketPrice) ??
+      optionalNumber(marketDataByTicker[ticker]?.market?.previousClose);
+    const focusResearchRow = ticker
+      ? {
+          id: `profile-${ticker}`,
+          ticker,
+          shares: 1,
+          averageCost: null,
+          currentPrice: price,
+          openedAt: null,
+          invested: null,
+          value: price,
+          pnl: null,
+          pnlPct: null,
+          annualizedReturn: null,
+          weight: null,
+          researchOnly: true,
+        }
+      : null;
     const activePortfolioRows = portfolioPositions.filter((row) => row.ticker && row.shares > 0);
     if (activePortfolioRows.length) {
-      return activePortfolioRows.map((row) => ({
+      const rows = activePortfolioRows.map((row) => ({
         id: row.id,
         ticker: row.ticker,
         shares: row.shares,
@@ -840,33 +1884,14 @@ export default function NeuroAnalysisPage() {
         pnl: row.pnl,
         pnlPct: row.pnlPct,
         annualizedReturn: row.annualizedReturn,
-        weight: row.weight ?? 0,
+        weight: row.weight,
       }));
+      if (focusResearchRow && !rows.some((row) => row.ticker.toUpperCase() === ticker)) {
+        return [focusResearchRow, ...rows];
+      }
+      return rows;
     }
-    const ticker = focusTicker.trim().toUpperCase();
-    if (!ticker) return [];
-    const price =
-      toNumber(marketData?.market?.regularMarketPrice) ||
-      toNumber(marketData?.market?.previousClose) ||
-      toNumber(marketDataByTicker[ticker]?.market?.regularMarketPrice) ||
-      toNumber(marketDataByTicker[ticker]?.market?.previousClose);
-    return [
-      {
-        id: `profile-${ticker}`,
-        ticker,
-        shares: 1,
-        averageCost: price,
-        currentPrice: price,
-        openedAt: null,
-        invested: price,
-        value: price,
-        pnl: 0,
-        pnlPct: 0,
-        annualizedReturn: null,
-        weight: 1,
-        researchOnly: true,
-      },
-    ];
+    return focusResearchRow ? [focusResearchRow] : [];
   }, [
     focusTicker,
     marketData?.market?.previousClose,
@@ -877,16 +1902,20 @@ export default function NeuroAnalysisPage() {
 
   const indexedDocuments = filings.filter((filing) => Boolean(filing.vectorStoreId));
   const pendingDocuments = filings.filter((filing) => !filing.vectorStoreId);
+  const configuredBenchmarkTicker =
+    String(investmentPolicy?.benchmark || BENCHMARK_TICKER)
+      .trim()
+      .toUpperCase() || BENCHMARK_TICKER;
   const profileTickers = useMemo(
     () =>
       Array.from(
         new Set([
           focusTicker.trim().toUpperCase(),
-          BENCHMARK_TICKER,
+          configuredBenchmarkTicker,
           ...portfolioHoldings.map((holding) => holding.ticker.trim().toUpperCase()),
         ])
       ).filter(Boolean),
-    [focusTicker, portfolioHoldings]
+    [configuredBenchmarkTicker, focusTicker, portfolioHoldings]
   );
   const marketPayload = useMemo(
     () => ({
@@ -965,7 +1994,7 @@ export default function NeuroAnalysisPage() {
   const readinessScore = Math.round(
     (readinessItems.filter((item) => item.done).length / readinessItems.length) * 100
   );
-  const benchmarkData = marketDataByTicker[BENCHMARK_TICKER] ?? null;
+  const benchmarkData = marketDataByTicker[configuredBenchmarkTicker] ?? null;
   const benchmarkAnnualizedReturn = useMemo(
     () => annualizedPriceReturn(benchmarkData?.priceHistory),
     [benchmarkData?.priceHistory]
@@ -976,8 +2005,9 @@ export default function NeuroAnalysisPage() {
       : null;
   const activePortfolioPositions = portfolioPositions.filter((row) => row.ticker && row.shares > 0);
   const topPortfolioMovers = activePortfolioPositions
+    .filter((row) => row.pnl != null)
     .slice()
-    .sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))
+    .sort((a, b) => Math.abs(Number(b.pnl)) - Math.abs(Number(a.pnl)))
     .slice(0, 4);
   const researchQueue = documentReadinessRows.filter((row: any) => !row.ready).slice(0, 5);
   const commandCenterAlerts = [
@@ -1003,28 +2033,30 @@ export default function NeuroAnalysisPage() {
     ...(agentReport ? [] : [L("No current Neuro report has been generated for this profile.", "Aún no hay reporte Neuro generado para este profile.")]),
   ].slice(0, 4);
   const portfolioXray = useMemo(() => {
+    const valuedPositions = activePortfolioPositions.filter((row) => row.value != null);
     const sectorRows = aggregateByKey(
-      activePortfolioPositions,
+      valuedPositions,
       (row) => row.sector || "Unclassified",
-      (row) => row.value
+      (row) => Number(row.value)
     );
     const instrumentRows = aggregateByKey(
-      activePortfolioPositions,
+      valuedPositions,
       (row) => {
         const item = marketDataByTicker[row.ticker];
         if (isFundLikeMarketData(item)) return "ETF / fund";
         return item?.company?.quoteType || item?.instrumentType || "Stock";
       },
-      (row) => row.value
+      (row) => Number(row.value)
     );
     const topHoldings = new Map<string, { name: string; value: number; funds: string[] }>();
-    for (const row of activePortfolioPositions) {
+    for (const row of valuedPositions) {
       const item = marketDataByTicker[row.ticker];
       for (const holding of item?.fund?.topHoldings ?? []) {
         const symbol = String(holding.symbol ?? holding.holdingName ?? "").trim().toUpperCase();
         if (!symbol) continue;
-        const holdingWeight = toNumber(holding.holdingPercent);
-        const contribution = row.value * (holdingWeight > 1 ? holdingWeight / 100 : holdingWeight);
+        const holdingWeight = optionalNumber(holding.holdingPercent);
+        if (holdingWeight == null) continue;
+        const contribution = Number(row.value) * (holdingWeight > 1 ? holdingWeight / 100 : holdingWeight);
         if (contribution <= 0) continue;
         const existing = topHoldings.get(symbol) ?? {
           name: String(holding.holdingName ?? symbol),
@@ -1041,7 +2073,10 @@ export default function NeuroAnalysisPage() {
         symbol,
         name: row.name,
         value: row.value,
-        weight: portfolioSummary.totalValue > 0 ? row.value / portfolioSummary.totalValue : null,
+        weight:
+          portfolioSummary.totalValue != null && portfolioSummary.totalValue > 0
+            ? row.value / portfolioSummary.totalValue
+            : null,
         funds: row.funds,
       }))
       .sort((a, b) => b.value - a.value)
@@ -1055,18 +2090,18 @@ export default function NeuroAnalysisPage() {
   const focusProfile360 = useMemo(() => {
     const latest = latestFundamentals;
     const documentRow = documentReadinessRows.find((row: any) => String(row?.ticker ?? "").toUpperCase() === focusTicker.toUpperCase());
-    const marginOfSafety = Number(focusEnginePosition?.derived?.marginOfSafety);
-    const fcfMargin = Number(latest?.fcfMargin ?? focusEnginePosition?.derived?.fcfMargin);
-    const debtToEquity = Number(latest?.debtToEquity ?? focusEnginePosition?.derived?.debtToEquity);
-    const dividendYield = toNumber(marketData?.fund?.yield ?? marketData?.market?.dividendYield);
-    const qualityScore =
+    const marginOfSafety = optionalNumber(focusEnginePosition?.derived?.marginOfSafety);
+    const fcfMargin = optionalNumber(latest?.fcfMargin ?? focusEnginePosition?.derived?.fcfMargin);
+    const debtToEquity = optionalNumber(latest?.debtToEquity ?? focusEnginePosition?.derived?.debtToEquity);
+    const dividendYield = optionalNumber(marketData?.fund?.yield ?? marketData?.market?.dividendYield);
+    const financialEvidenceScore =
       scoreFromBoolean(annualFundamentals.length >= 3 || Boolean(marketData?.fund), 20) +
-      scoreFromBoolean(Number.isFinite(fcfMargin) && fcfMargin > 0.05, 25) +
-      scoreFromBoolean(!Number.isFinite(debtToEquity) || debtToEquity < 1.5, 20) +
+      scoreFromBoolean(fcfMargin != null && fcfMargin > 0.05, 25) +
+      scoreFromBoolean(debtToEquity != null && debtToEquity < 1.5, 20) +
       scoreFromBoolean(Boolean(marketData?.priceHistory?.length), 15) +
       scoreFromBoolean(!marketData?.dataQuality?.degraded, 20);
     const valuationScore =
-      Number.isFinite(marginOfSafety)
+      marginOfSafety != null
         ? clampNumber(50 + marginOfSafety * 140, 0, 100)
         : focusEnginePosition?.derived?.valuationStatus === "undervalued"
         ? 75
@@ -1074,10 +2109,10 @@ export default function NeuroAnalysisPage() {
         ? 35
         : 50;
     const dividendScore =
-      scoreFromBoolean(dividendYield > 0, 30) +
-      scoreFromBoolean(dividendYield > 0.015 && dividendYield < 0.08, 30) +
-      scoreFromBoolean(Number.isFinite(fcfMargin) && fcfMargin > 0, 25) +
-      scoreFromBoolean(!Number.isFinite(debtToEquity) || debtToEquity < 2, 15);
+      scoreFromBoolean(dividendYield != null && dividendYield > 0, 30) +
+      scoreFromBoolean(dividendYield != null && dividendYield > 0.015 && dividendYield < 0.08, 30) +
+      scoreFromBoolean(fcfMargin != null && fcfMargin > 0, 25) +
+      scoreFromBoolean(debtToEquity != null && debtToEquity < 2, 15);
     const evidenceScore =
       scoreFromBoolean(Boolean(marketLayerReady), 25) +
       scoreFromBoolean(Boolean(documentRow?.ready), 35) +
@@ -1087,12 +2122,10 @@ export default function NeuroAnalysisPage() {
       scoreFromBoolean(!(portfolioSummary.largestPosition?.weight && portfolioSummary.largestPosition.weight > 0.35), 25) +
       scoreFromBoolean(!marketData?.dataQuality?.degraded, 20) +
       scoreFromBoolean(!researchQueue.length, 20) +
-      scoreFromBoolean(!(Number.isFinite(debtToEquity) && debtToEquity > 2), 20) +
+      scoreFromBoolean(debtToEquity != null && debtToEquity <= 2, 20) +
       scoreFromBoolean(Boolean(marketData?.priceHistory?.length), 15);
-    const overall = Math.round((qualityScore + valuationScore + dividendScore + evidenceScore + riskScore) / 5);
     return {
-      overall,
-      qualityScore,
+      financialEvidenceScore,
       valuationScore,
       dividendScore,
       evidenceScore,
@@ -1112,8 +2145,111 @@ export default function NeuroAnalysisPage() {
     marketLayerReady,
     portfolioSummary.largestPosition?.weight,
     researchQueue.length,
-    thesisNotes.length,
+      thesisNotes.length,
+    ]);
+  const currentDecisionSupport = useMemo(() => {
+    if (!engineSnapshot && serverDecisionSupport) return serverDecisionSupport;
+    if (!engineSnapshot) return null;
+    const privateMethodologyReady = serverDecisionSupport?.evidence?.privateMethodologyReady ?? false;
+    const serverVectorStores = Number(serverDecisionSupport?.evidence?.vectorStoreCount ?? 0);
+    const aiTradeProposalsEnabled = !serverDecisionSupport?.blockingReasons?.includes(
+      "AI-generated trade proposals disabled by emergency control"
+    );
+    return buildNeuroDecisionSupport({
+      engine: engineSnapshot,
+      policy: investmentPolicy,
+      focusTicker,
+      marketData,
+      vectorStoreCount: Math.max(serverVectorStores, indexedDocuments.length + (privateMethodologyReady ? 1 : 0)),
+      filingsIndexed: indexedDocuments.length,
+      privateMethodologyReady,
+      businessQualityAnalysis,
+      managementCapitalAllocationAnalysis,
+      earningsQualityAccountingRiskAnalysis,
+      independentBearCaseAnalysis,
+      aiTradeProposalsEnabled,
+    });
+  }, [
+    engineSnapshot,
+    focusTicker,
+    indexedDocuments.length,
+    investmentPolicy,
+    marketData,
+    businessQualityAnalysis,
+    managementCapitalAllocationAnalysis,
+    earningsQualityAccountingRiskAnalysis,
+    independentBearCaseAnalysis,
+    serverDecisionSupport,
   ]);
+  const selectedCommitteePacket = useMemo(
+    () =>
+      committeePackets.find((packet) => packet.id === selectedCommitteePacketId) ??
+      committeePackets[0] ??
+      null,
+    [committeePackets, selectedCommitteePacketId]
+  );
+  const selectedCommitteePacketDecision = useMemo(
+    () =>
+      selectedCommitteePacket
+        ? committeeDecisions.find((decision) => decision.packet_id === selectedCommitteePacket.id) ?? null
+        : null,
+    [committeeDecisions, selectedCommitteePacket]
+  );
+  const selectedCommitteeBusinessQualityReady = useMemo(() => {
+    const analysis =
+      selectedCommitteePacket?.evidence_snapshot?.businessQualityAnalysis ??
+      selectedCommitteePacket?.report_snapshot?.structured?.businessQualityAnalysis ??
+      null;
+    return Boolean(
+      analysis?.status === "not_applicable" ||
+        (analysis?.generatedBy === "ai_research" && analysis?.status === "complete")
+    );
+  }, [selectedCommitteePacket]);
+  const selectedCommitteeManagementAllocationReady = useMemo(() => {
+    const analysis =
+      selectedCommitteePacket?.evidence_snapshot?.managementCapitalAllocationAnalysis ??
+      selectedCommitteePacket?.report_snapshot?.structured?.managementCapitalAllocationAnalysis ??
+      null;
+    return Boolean(
+      analysis?.status === "not_applicable" ||
+        (analysis?.generatedBy === "ai_research" &&
+          (analysis?.status === "complete" || analysis?.status === "provisional"))
+    );
+  }, [selectedCommitteePacket]);
+  const selectedCommitteeEarningsQualityReady = useMemo(() => {
+    const analysis =
+      selectedCommitteePacket?.evidence_snapshot?.earningsQualityAccountingRiskAnalysis ??
+      selectedCommitteePacket?.report_snapshot?.structured?.earningsQualityAccountingRiskAnalysis ??
+      null;
+    return Boolean(
+      analysis?.status === "not_applicable" ||
+        (analysis?.generatedBy === "ai_research" &&
+          (analysis?.status === "complete" || analysis?.status === "provisional"))
+    );
+  }, [selectedCommitteePacket]);
+  const selectedCommitteeBearCaseReady = useMemo(() => {
+    const analysis =
+      selectedCommitteePacket?.evidence_snapshot?.independentBearCaseAnalysis ??
+      selectedCommitteePacket?.report_snapshot?.structured?.independentBearCaseAnalysis ??
+      null;
+    return Boolean(
+      analysis?.status === "not_applicable" ||
+        (analysis?.generatedBy === "ai_research" &&
+          (analysis?.status === "complete" || analysis?.status === "provisional"))
+    );
+  }, [selectedCommitteePacket]);
+  const selectedCommitteeResearchDossiersReady =
+    selectedCommitteeBusinessQualityReady &&
+    selectedCommitteeManagementAllocationReady &&
+    selectedCommitteeEarningsQualityReady &&
+    selectedCommitteeBearCaseReady;
+  const committeeSourceMap = useMemo(
+    () =>
+      new Map(
+        (selectedCommitteePacket?.source_manifest ?? []).map((source) => [source.id, source] as const)
+      ),
+    [selectedCommitteePacket]
+  );
   const thesisMonitor = useMemo(() => {
     const impactCounts = thesisNotes.reduce<Record<string, number>>((out, note) => {
       const key = String(note.payload?.impact ?? "uncertain");
@@ -1198,7 +2334,7 @@ export default function NeuroAnalysisPage() {
             researchOnly: Boolean((holding as any).researchOnly),
           })),
           marketData: marketPayload,
-          readiness: { documentReadiness: documentReadinessRows, readinessScore },
+          readiness: { documentReadiness: documentReadinessRows, readinessScore, availableCapital },
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -1226,18 +2362,31 @@ export default function NeuroAnalysisPage() {
     setFocusTicker(loadedFocusTicker);
     setFocusTickerDraft(loadedFocusTicker);
     setResearchGoal(String(researchCase.research_goal ?? researchGoal));
-    if (Array.isArray(researchCase.holdings) && researchCase.holdings.length > 0) {
+    if (Array.isArray(researchCase.holdings)) {
       setPortfolioHoldings(
-        researchCase.holdings.map((holding: any, index: number) => ({
-          id: makeId(`${holding?.ticker ?? "position"}-${index}`),
-          ticker: String(holding?.ticker ?? "").toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12),
-          shares: Math.max(0, toNumber(holding?.shares)),
-          averageCost: Math.max(0, toNumber(holding?.averageCost)),
-          currentPrice: Math.max(0, toNumber(holding?.currentPrice)),
-          openedAt: String(holding?.openedAt ?? holding?.opened_at ?? oneYearAgoInputDate()).slice(0, 10),
-        }))
+        researchCase.holdings
+          .filter((holding: any) => !holding?.researchOnly)
+          .map((holding: any, index: number) => ({
+            id: makeId(`${holding?.ticker ?? "position"}-${index}`),
+            ticker: String(holding?.ticker ?? "").toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12),
+            shares: Math.max(0, toNumber(holding?.shares)),
+            averageCost:
+              optionalNumber(holding?.averageCost) == null
+                ? null
+                : Math.max(0, Number(optionalNumber(holding?.averageCost))),
+            currentPrice:
+              optionalNumber(holding?.currentPrice) == null
+                ? null
+                : Math.max(0, Number(optionalNumber(holding?.currentPrice))),
+            openedAt: String(holding?.openedAt ?? holding?.opened_at ?? oneYearAgoInputDate()).slice(0, 10),
+          }))
       );
     }
+    const loadedAvailableCapital = optionalNumber(
+      researchCase.readiness?.availableCapital ??
+        researchCase.readiness?.capitalAllocationDashboard?.availableCapital
+    );
+    setAvailableCapital(loadedAvailableCapital == null ? null : Math.max(0, loadedAvailableCapital));
     const savedMarket = researchCase.market_data;
     if (savedMarket?.items && typeof savedMarket.items === "object") {
       setMarketDataByTicker(savedMarket.items);
@@ -1255,6 +2404,37 @@ export default function NeuroAnalysisPage() {
       setActiveReportId(String(latest.id));
       setAgentReport(String(latest.report_text ?? ""));
       setEngineSnapshot(latest.engine ?? latest.structured?.engine ?? null);
+      setReportFinancialDataIntegrity(latest.structured?.financialDataIntegrity ?? latest.engine?.financialDataIntegrity ?? null);
+      setBusinessQualityAnalysis(latest.structured?.businessQualityAnalysis ?? null);
+      setManagementCapitalAllocationAnalysis(latest.structured?.managementCapitalAllocationAnalysis ?? null);
+      setEarningsQualityAccountingRiskAnalysis(latest.structured?.earningsQualityAccountingRiskAnalysis ?? null);
+      setIndependentBearCaseAnalysis(latest.structured?.independentBearCaseAnalysis ?? null);
+      setPortfolioExposureMap(latest.structured?.portfolioExposureMap ?? null);
+      setMacroContext(latest.structured?.macroContext ?? null);
+      setCapitalAllocationDashboard(latest.structured?.capitalAllocationDashboard ?? null);
+      setPerformanceAttribution(latest.structured?.performanceAttribution ?? null);
+      const latestAvailableCapital = optionalNumber(latest.structured?.capitalAllocationDashboard?.availableCapital);
+      if (latestAvailableCapital != null) setAvailableCapital(Math.max(0, latestAvailableCapital));
+      setOriginalInvestmentThesis(latest.structured?.originalInvestmentThesis ?? originalInvestmentThesis);
+      setInvestmentThesisReview(latest.structured?.investmentThesisReview ?? null);
+      setPositionExitReview(latest.structured?.positionExitReview ?? null);
+      setServerDecisionSupport(latest.structured?.decisionSupport ?? null);
+    } else {
+      setActiveReportId(null);
+      setAgentReport("");
+      setEngineSnapshot(null);
+      setReportFinancialDataIntegrity(null);
+      setBusinessQualityAnalysis(null);
+      setManagementCapitalAllocationAnalysis(null);
+      setEarningsQualityAccountingRiskAnalysis(null);
+      setIndependentBearCaseAnalysis(null);
+      setPortfolioExposureMap(null);
+      setMacroContext(null);
+      setCapitalAllocationDashboard(null);
+      setPerformanceAttribution(null);
+      setInvestmentThesisReview(null);
+      setPositionExitReview(null);
+      setServerDecisionSupport(null);
     }
   }
 
@@ -1262,6 +2442,21 @@ export default function NeuroAnalysisPage() {
     setActiveReportId(String(report.id));
     setAgentReport(String(report.report_text ?? ""));
     setEngineSnapshot(report.engine ?? report.structured?.engine ?? null);
+    setReportFinancialDataIntegrity(report.structured?.financialDataIntegrity ?? report.engine?.financialDataIntegrity ?? null);
+    setBusinessQualityAnalysis(report.structured?.businessQualityAnalysis ?? null);
+    setManagementCapitalAllocationAnalysis(report.structured?.managementCapitalAllocationAnalysis ?? null);
+    setEarningsQualityAccountingRiskAnalysis(report.structured?.earningsQualityAccountingRiskAnalysis ?? null);
+    setIndependentBearCaseAnalysis(report.structured?.independentBearCaseAnalysis ?? null);
+    setPortfolioExposureMap(report.structured?.portfolioExposureMap ?? null);
+    setMacroContext(report.structured?.macroContext ?? null);
+    setCapitalAllocationDashboard(report.structured?.capitalAllocationDashboard ?? null);
+    setPerformanceAttribution(report.structured?.performanceAttribution ?? null);
+    const reportAvailableCapital = optionalNumber(report.structured?.capitalAllocationDashboard?.availableCapital);
+    if (reportAvailableCapital != null) setAvailableCapital(Math.max(0, reportAvailableCapital));
+    setOriginalInvestmentThesis(report.structured?.originalInvestmentThesis ?? originalInvestmentThesis);
+    setInvestmentThesisReview(report.structured?.investmentThesisReview ?? null);
+    setPositionExitReview(report.structured?.positionExitReview ?? null);
+    setServerDecisionSupport(report.structured?.decisionSupport ?? null);
   }
 
   async function downloadReportPdf() {
@@ -1325,6 +2520,7 @@ export default function NeuroAnalysisPage() {
   useEffect(() => {
     if (accessAllowed !== true) return;
     void loadCaseList(activeCaseId);
+    void loadInvestmentPolicy();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessAllowed]);
 
@@ -1443,28 +2639,43 @@ export default function NeuroAnalysisPage() {
     ]);
   }
 
-  async function findCompanyDocuments() {
+  async function lookupCompanyDocuments(options: { quiet?: boolean } = {}) {
     try {
-      setDocumentLookupLoading(true);
+      if (!options.quiet) setDocumentLookupLoading(true);
       setDocumentLookupError("");
       const res = await authedFetch(`/api/neuro-analysis/company-documents?ticker=${encodeURIComponent(focusTicker)}`);
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Could not find recent company documents.");
-      setDocumentLookup(Array.isArray(json?.documents) ? json.documents : []);
+      const documents = Array.isArray(json?.documents) ? (json.documents as CompanyDocumentLookup[]) : [];
+      setDocumentLookup(documents);
+      return documents;
     } catch (error: any) {
-      setDocumentLookupError(error?.message || "Could not find recent company documents.");
+      const message = error?.message || "Could not find recent company documents.";
+      setDocumentLookupError(message);
+      if (options.quiet) throw new Error(message);
+      return [];
     } finally {
-      setDocumentLookupLoading(false);
+      if (!options.quiet) setDocumentLookupLoading(false);
     }
+  }
+
+  async function findCompanyDocuments() {
+    await lookupCompanyDocuments();
   }
 
   function companyDocumentKey(document: CompanyDocumentLookup) {
     return `${document.form}-${document.accessionNumber}`;
   }
 
-  function companyDocumentIsImported(document: CompanyDocumentLookup) {
+  function mergeFilingIntoList(source: FilingUpload[], ready: FilingUpload) {
+    const existingIndex = source.findIndex((item) => item.id === ready.id);
+    if (existingIndex < 0) return [ready, ...source];
+    return source.map((item, index) => (index === existingIndex ? ready : item));
+  }
+
+  function companyDocumentIsImported(document: CompanyDocumentLookup, sourceFilings: FilingUpload[] = filings) {
     const accession = document.accessionNumber.replace(/-/g, "");
-    return filings.some(
+    return sourceFilings.some(
       (filing) =>
         Boolean(filing.vectorStoreId) &&
         String(filing.ticker ?? focusTicker).toUpperCase() === document.ticker &&
@@ -1475,9 +2686,9 @@ export default function NeuroAnalysisPage() {
     );
   }
 
-  function latestCompanyDocuments() {
+  function latestCompanyDocuments(sourceDocuments: CompanyDocumentLookup[] = documentLookup) {
     return (["10-K", "10-Q"] as const)
-      .map((form) => documentLookup.find((document) => document.form === form))
+      .map((form) => sourceDocuments.find((document) => document.form === form))
       .filter((document): document is CompanyDocumentLookup => Boolean(document));
   }
 
@@ -1507,28 +2718,30 @@ export default function NeuroAnalysisPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Company document import failed.");
 
+      const completed = json?.queued && json?.job?.id
+        ? await waitForNeuroJob(String(json.job.id))
+        : json;
+
       const ready: FilingUpload = {
-        id: String(json.id ?? key),
-        ticker: String(json.ticker ?? focusTicker),
-        form: json.form === "10-Q" ? "10-Q" : "10-K",
-        fileName: String(json.fileName ?? document.primaryDocument),
-        fiscalYear: json.fiscalYear == null ? null : Number(json.fiscalYear),
-        period: json.period ?? null,
-        periodEnd: json.periodEnd ?? document.periodEnd ?? null,
-        fileId: String(json.fileId ?? ""),
-        vectorStoreId: String(json.vectorStoreId ?? ""),
-        bytes: Number(json.bytes ?? 0),
-        usageBytes: Number(json.usageBytes ?? 0),
-        expiresAt: json.expiresAt ?? null,
-        createdAt: json.createdAt ?? null,
-        expiresAfterDays: Number(json.expiresAfterDays ?? 0),
+        id: String(completed.id ?? key),
+        ticker: String(completed.ticker ?? focusTicker),
+        form: completed.form === "10-Q" ? "10-Q" : "10-K",
+        fileName: String(completed.fileName ?? document.primaryDocument),
+        fiscalYear: completed.fiscalYear == null ? null : Number(completed.fiscalYear),
+        period: completed.period ?? null,
+        periodEnd: completed.periodEnd ?? document.periodEnd ?? null,
+        fileId: String(completed.fileId ?? ""),
+        vectorStoreId: String(completed.vectorStoreId ?? ""),
+        bytes: Number(completed.bytes ?? 0),
+        usageBytes: Number(completed.usageBytes ?? 0),
+        expiresAt: completed.expiresAt ?? null,
+        createdAt: completed.createdAt ?? null,
+        expiresAfterDays: Number(completed.expiresAfterDays ?? 0),
         status: "ready",
         error: "",
       };
       setFilings((prev) => {
-        const existingIndex = prev.findIndex((item) => item.id === ready.id);
-        if (existingIndex < 0) return [ready, ...prev];
-        return prev.map((item, index) => (index === existingIndex ? ready : item));
+        return mergeFilingIntoList(prev, ready);
       });
       return ready;
     } catch (error: any) {
@@ -1543,18 +2756,24 @@ export default function NeuroAnalysisPage() {
     }
   }
 
-  async function importLatestCompanyDocuments() {
-    const latest = latestCompanyDocuments()
-      .filter((document) => !companyDocumentIsImported(document));
-    if (!latest.length) return;
+  async function importLatestCompanyDocuments(
+    sourceDocuments: CompanyDocumentLookup[] = documentLookup,
+    sourceFilings: FilingUpload[] = filings
+  ) {
+    const latest = latestCompanyDocuments(sourceDocuments)
+      .filter((document) => !companyDocumentIsImported(document, sourceFilings));
+    if (!latest.length) return sourceFilings;
 
     setDocumentBatchImporting(true);
     setDocumentImportError("");
+    let nextFilings = sourceFilings;
     try {
       for (const document of latest) {
         const imported = await importCompanyDocument(document);
         if (!imported) break;
+        nextFilings = mergeFilingIntoList(nextFilings, imported);
       }
+      return nextFilings;
     } finally {
       setDocumentBatchImporting(false);
     }
@@ -1618,21 +2837,25 @@ export default function NeuroAnalysisPage() {
       throw new Error(message);
     }
 
+    const completed = json?.queued && json?.job?.id
+      ? await waitForNeuroJob(String(json.job.id))
+      : json;
+
     const ready: FilingUpload = {
       ...filing,
-      id: String(json.id ?? filing.id),
-      ticker: String(json.ticker ?? focusTicker),
+      id: String(completed.id ?? filing.id),
+      ticker: String(completed.ticker ?? focusTicker),
       file: undefined,
-      fileId: String(json.fileId ?? ""),
-      vectorStoreId: String(json.vectorStoreId ?? ""),
-      fiscalYear: json.fiscalYear == null ? filing.fiscalYear ?? null : Number(json.fiscalYear),
-      period: json.period ?? filing.period ?? null,
-      periodEnd: json.periodEnd ?? filing.periodEnd ?? null,
-      bytes: Number(json.bytes ?? filing.bytes ?? 0),
-      usageBytes: Number(json.usageBytes ?? 0),
-      expiresAt: json.expiresAt ?? null,
-      createdAt: json.createdAt ?? null,
-      expiresAfterDays: Number(json.expiresAfterDays ?? 0),
+      fileId: String(completed.fileId ?? ""),
+      vectorStoreId: String(completed.vectorStoreId ?? ""),
+      fiscalYear: completed.fiscalYear == null ? filing.fiscalYear ?? null : Number(completed.fiscalYear),
+      period: completed.period ?? filing.period ?? null,
+      periodEnd: completed.periodEnd ?? filing.periodEnd ?? null,
+      bytes: Number(completed.bytes ?? filing.bytes ?? 0),
+      usageBytes: Number(completed.usageBytes ?? 0),
+      expiresAt: completed.expiresAt ?? null,
+      createdAt: completed.createdAt ?? null,
+      expiresAfterDays: Number(completed.expiresAfterDays ?? 0),
       status: "ready",
       error: "",
     };
@@ -1652,10 +2875,21 @@ export default function NeuroAnalysisPage() {
     };
   }
 
-  async function runNeuroAgent() {
+  async function runNeuroAgent(options: { filingsOverride?: FilingUpload[] } = {}) {
     setAgentLoading(true);
     setAgentError("");
     setAgentReport("");
+    setReportFinancialDataIntegrity(null);
+    setBusinessQualityAnalysis(null);
+    setManagementCapitalAllocationAnalysis(null);
+    setEarningsQualityAccountingRiskAnalysis(null);
+    setIndependentBearCaseAnalysis(null);
+    setPortfolioExposureMap(null);
+    setMacroContext(null);
+    setCapitalAllocationDashboard(null);
+    setPerformanceAttribution(null);
+    setInvestmentThesisReview(null);
+    setPositionExitReview(null);
     try {
       const token = await authToken();
       if (!token) throw new Error(L("Sign in to run Neuro Analysis.", "Inicia sesión para correr Neuro Analysis."));
@@ -1663,8 +2897,9 @@ export default function NeuroAnalysisPage() {
         throw new Error(L("Choose a focus ticker first.", "Escoge un ticker foco primero."));
       }
 
+      const filingsForRun = options.filingsOverride ?? filings;
       const uploadedFilings = (
-        await Promise.all(filings.map((filing) => uploadDocumentIfNeeded(filing, token)))
+        await Promise.all(filingsForRun.map((filing) => uploadDocumentIfNeeded(filing, token)))
       ).filter(Boolean);
 
       const res = await fetch("/api/neuro-analysis/analyze", {
@@ -1682,7 +2917,9 @@ export default function NeuroAnalysisPage() {
             averageCost: holding.averageCost,
             currentPrice: holding.currentPrice,
             openedAt: holding.openedAt,
+            researchOnly: Boolean((holding as any).researchOnly),
           })),
+          availableCapital,
           caseId: activeCaseId,
           caseTitle:
             caseTitle.trim() ||
@@ -1697,12 +2934,25 @@ export default function NeuroAnalysisPage() {
             discountRatePct: 10,
             marginOfSafetyPct: 25,
             baseGrowthPct: null,
+            terminalGrowthPct: 2.5,
           },
           marketData: marketPayload,
           uploadedFilings,
+          investmentThesis: [
+            researchGoal,
+            ...thesisNotes.map((note) => note.payload?.note ?? "").filter(Boolean),
+          ].join("\n\n"),
+          thesisContext: thesisNotes.map((note) => ({
+            note: note.payload?.note,
+            sourceType: note.payload?.sourceType,
+            sourceLabel: note.payload?.sourceLabel,
+            impact: note.payload?.impact,
+            happenedAt: note.payload?.happenedAt,
+            evidenceLevel: note.payload?.evidenceLevel,
+          })),
           question: `${researchGoal}\n\n${isEs ? "No reveles nombres de proveedores, fuentes privadas ni metodologías internas." : "Do not reveal provider names, private sources, or internal methodologies."}`,
         }),
-        signal: AbortSignal.timeout(180_000),
+        signal: AbortSignal.timeout(240_000),
       });
 
       const json = await res.json().catch(() => ({}));
@@ -1711,21 +2961,152 @@ export default function NeuroAnalysisPage() {
       }
       setAgentReport(String(json?.report ?? ""));
       setEngineSnapshot(json?.engine ?? json?.structured?.engine ?? null);
+      setReportFinancialDataIntegrity(
+        json?.financialDataIntegrity ?? json?.structured?.financialDataIntegrity ?? json?.engine?.financialDataIntegrity ?? null
+      );
+      setBusinessQualityAnalysis(json?.businessQualityAnalysis ?? json?.structured?.businessQualityAnalysis ?? null);
+      setManagementCapitalAllocationAnalysis(
+        json?.managementCapitalAllocationAnalysis ?? json?.structured?.managementCapitalAllocationAnalysis ?? null
+      );
+      setEarningsQualityAccountingRiskAnalysis(
+        json?.earningsQualityAccountingRiskAnalysis ??
+          json?.structured?.earningsQualityAccountingRiskAnalysis ??
+          null
+      );
+      setIndependentBearCaseAnalysis(
+        json?.independentBearCaseAnalysis ?? json?.structured?.independentBearCaseAnalysis ?? null
+      );
+      setPortfolioExposureMap(json?.portfolioExposureMap ?? json?.structured?.portfolioExposureMap ?? null);
+      setMacroContext(json?.macroContext ?? json?.structured?.macroContext ?? null);
+      setCapitalAllocationDashboard(
+        json?.capitalAllocationDashboard ?? json?.structured?.capitalAllocationDashboard ?? null
+      );
+      setPerformanceAttribution(
+        json?.performanceAttribution ?? json?.structured?.performanceAttribution ?? null
+      );
+      setOriginalInvestmentThesis(
+        json?.originalInvestmentThesis ?? json?.structured?.originalInvestmentThesis ?? originalInvestmentThesis
+      );
+      setInvestmentThesisReview(
+        json?.investmentThesisReview ?? json?.structured?.investmentThesisReview ?? null
+      );
+      setPositionExitReview(json?.positionExitReview ?? json?.structured?.positionExitReview ?? null);
+      setServerDecisionSupport(json?.decisionSupport ?? json?.structured?.decisionSupport ?? null);
       if (json?.caseId) setActiveCaseId(String(json.caseId));
       if (json?.reportId) setActiveReportId(String(json.reportId));
       await loadCaseList(json?.caseId ? String(json.caseId) : activeCaseId);
+      await loadInvestmentCommittee(json?.caseId ? String(json.caseId) : activeCaseId);
+      return true;
     } catch (error: any) {
       const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
       setAgentError(
         timedOut
           ? L(
-              "The analysis took longer than three minutes and was stopped. Your data is safe; please run it again.",
-              "El análisis tomó más de tres minutos y se detuvo. Tu data está segura; vuelve a correrlo."
+              "The pre-valuation analysis took longer than four minutes and was stopped. Your data is safe; please run it again.",
+              "El análisis previo a valoración tomó más de cuatro minutos y se detuvo. Tu data está segura; vuelve a correrlo."
             )
           : error?.message || "Neuro Analysis failed."
       );
+      return false;
     } finally {
       setAgentLoading(false);
+    }
+  }
+
+  async function runPerformanceAttribution() {
+    try {
+      setPerformanceAttributionLoading(true);
+      setPerformanceAttributionError("");
+      const res = await authedFetch("/api/neuro-analysis/performance-attribution", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          language: isEs ? "es" : "en",
+          holdings: researchHoldings.map((holding) => ({
+            ticker: holding.ticker,
+            shares: holding.shares,
+            averageCost: holding.averageCost,
+            currentPrice: holding.currentPrice,
+            openedAt: holding.openedAt,
+            researchOnly: Boolean((holding as any).researchOnly),
+          })),
+          marketData: marketPayload,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Performance attribution failed.");
+      setPerformanceAttribution(json?.performanceAttribution ?? null);
+    } catch (error: any) {
+      setPerformanceAttributionError(
+        error?.message || L("Performance attribution failed.", "Falló la atribución de performance.")
+      );
+    } finally {
+      setPerformanceAttributionLoading(false);
+    }
+  }
+
+  async function autoBuildEvidenceAndRun() {
+    if (autoRunLoading || agentLoading) return;
+    setAutoRunLoading(true);
+    setAutoRunStatus("");
+    setAgentError("");
+    setDocumentLookupError("");
+    setDocumentImportError("");
+
+    try {
+      if (!focusTicker.trim()) {
+        throw new Error(L("Choose a focus ticker first.", "Escoge un ticker foco primero."));
+      }
+
+      if (focusInstrumentIsFundLike) {
+        setAutoRunStatus(
+          L(
+            "Fund profile detected. Running with fund strategy, holdings, fees, yield, liquidity, and market history.",
+            "Profile de fondo detectado. Corriendo con estrategia, holdings, costos, yield, liquidez e historial de mercado."
+          )
+        );
+        const ok = await runNeuroAgent();
+        if (ok) setAutoRunStatus(L("Report ready.", "Reporte listo."));
+        return;
+      }
+
+      setAutoRunStatus(L("Finding recent official 10-K and 10-Q filings...", "Buscando filings oficiales 10-K y 10-Q recientes..."));
+      const documents = await lookupCompanyDocuments({ quiet: true });
+      if (!documents.length) {
+        throw new Error(
+          L(
+            "No recent official filings were found for this ticker. Upload the 10-K/10-Q PDFs manually and run the analysis again.",
+            "No se encontraron filings oficiales recientes para este ticker. Sube manualmente los PDFs 10-K/10-Q y vuelve a correr el análisis."
+          )
+        );
+      }
+
+      const missingOfficialDocs = latestCompanyDocuments(documents)
+        .filter((document) => !companyDocumentIsImported(document));
+      if (missingOfficialDocs.length) {
+        setAutoRunStatus(L("Importing and indexing official filings...", "Importando e indexando filings oficiales..."));
+      } else {
+        setAutoRunStatus(L("Official filings are already indexed. Preparing AI analysis...", "Los filings oficiales ya están indexados. Preparando análisis AI..."));
+      }
+
+      const nextFilings = await importLatestCompanyDocuments(documents, filings);
+      const stillMissingImportedDocs = latestCompanyDocuments(documents)
+        .filter((document) => !companyDocumentIsImported(document, nextFilings));
+      if (stillMissingImportedDocs.length) {
+        throw new Error(
+          L(
+            "At least one official filing could not be imported. Review the document panel or upload the PDF manually before running AI.",
+            "Al menos un filing oficial no pudo importarse. Revisa el panel de documentos o sube el PDF manualmente antes de correr AI."
+          )
+        );
+      }
+      setAutoRunStatus(L("Running evidence-backed AI profile...", "Corriendo profile AI con evidencia..."));
+      const ok = await runNeuroAgent({ filingsOverride: nextFilings });
+      if (ok) setAutoRunStatus(L("Report ready.", "Reporte listo."));
+    } catch (error: any) {
+      setAgentError(error?.message || L("Auto evidence run failed.", "Falló el run automático con evidencia."));
+    } finally {
+      setAutoRunLoading(false);
     }
   }
 
@@ -1771,7 +3152,14 @@ export default function NeuroAnalysisPage() {
               pnlPct: holding.pnlPct,
               openedAt: holding.openedAt,
               annualizedReturn: holding.annualizedReturn,
+              researchOnly: Boolean((holding as any).researchOnly),
             })),
+            availableCapital,
+            macroContext,
+            capitalAllocationDashboard,
+            performanceAttribution: performanceAttribution
+              ? { ...performanceAttribution, calculationInput: undefined }
+              : null,
             marketData: marketPayload,
             documentReadiness: documentReadinessRows,
             engineSnapshot,
@@ -1868,13 +3256,14 @@ export default function NeuroAnalysisPage() {
     try {
       setScreenerLoading(true);
       setScreenerError("");
-      const params = new URLSearchParams({ sector: screenerSector });
+      const params = new URLSearchParams({ sector: screenerSector, strategy: screenerStrategy });
       if (screenerCustomTickers.trim()) params.set("tickers", screenerCustomTickers.trim());
       const res = await authedFetch(`/api/neuro-analysis/sector-screener?${params.toString()}`);
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Sector screener failed.");
       setScreenerResult(json as SectorScreenerResult);
       if (json?.sector) setScreenerSector(String(json.sector));
+      if (json?.strategy) setScreenerStrategy(String(json.strategy));
     } catch (error: any) {
       setScreenerError(error?.message || "Sector screener failed.");
     } finally {
@@ -1885,6 +3274,10 @@ export default function NeuroAnalysisPage() {
   function openScreenerTicker(ticker: string) {
     const nextTicker = ticker.trim().toUpperCase();
     if (!nextTicker) return;
+    if (originalInvestmentThesis && nextTicker !== originalInvestmentThesis.ticker) {
+      startNewResearchCase(nextTicker);
+      return;
+    }
     setFocusTicker(nextTicker);
     setFocusTickerDraft(nextTicker);
     setResearchGoal(defaultResearchGoal(isEs));
@@ -1894,8 +3287,54 @@ export default function NeuroAnalysisPage() {
   function applyFocusTicker(ticker = focusTickerDraft) {
     const nextTicker = ticker.trim().toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12);
     if (!nextTicker) return;
+    if (originalInvestmentThesis && nextTicker !== originalInvestmentThesis.ticker) {
+      setFocusTickerDraft(originalInvestmentThesis.ticker);
+      setCaseStatus(
+        L(
+          "This case has a permanent original thesis. Start a new research case for another ticker.",
+          "Este caso tiene una tesis original permanente. Inicia otro caso de research para usar otro ticker."
+        )
+      );
+      return;
+    }
     setFocusTicker(nextTicker);
     setFocusTickerDraft(nextTicker);
+  }
+
+  function startNewResearchCase(ticker = "") {
+    const nextTicker = ticker.trim().toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12);
+    setActiveCaseId(null);
+    setActiveReportId(null);
+    setCaseTitle("");
+    setFocusTicker(nextTicker);
+    setFocusTickerDraft(nextTicker);
+    setResearchGoal(defaultResearchGoal(isEs));
+    setFilings([]);
+    setMarketData(nextTicker ? marketDataByTicker[nextTicker] ?? null : null);
+    setAgentReport("");
+    setEngineSnapshot(null);
+    setReportFinancialDataIntegrity(null);
+    setBusinessQualityAnalysis(null);
+    setManagementCapitalAllocationAnalysis(null);
+    setEarningsQualityAccountingRiskAnalysis(null);
+    setIndependentBearCaseAnalysis(null);
+    setPortfolioExposureMap(null);
+    setMacroContext(null);
+    setCapitalAllocationDashboard(null);
+    setPerformanceAttribution(null);
+    setServerDecisionSupport(null);
+    setReports([]);
+    setThesisNotes([]);
+    setOriginalInvestmentThesis(null);
+    setInvestmentThesisReview(null);
+    setInvestmentThesisReviewHistory([]);
+    setPositionExitReview(null);
+    setPositionExitReviewHistory([]);
+    setCommitteePackets([]);
+    setCommitteeDecisions([]);
+    setSelectedCommitteePacketId(null);
+    setActiveWorkspaceTab("research");
+    setCaseStatus(L("New research case ready.", "Nuevo caso de research listo."));
   }
 
   function updatePortfolioHolding(id: string, patch: Partial<Holding>) {
@@ -1911,9 +3350,17 @@ export default function NeuroAnalysisPage() {
                   : String(patch.ticker).toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12),
               shares: patch.shares === undefined ? holding.shares : Math.max(0, toNumber(patch.shares)),
               averageCost:
-                patch.averageCost === undefined ? holding.averageCost : Math.max(0, toNumber(patch.averageCost)),
+                patch.averageCost === undefined
+                  ? holding.averageCost
+                  : optionalNumber(patch.averageCost) == null
+                    ? null
+                    : Math.max(0, Number(optionalNumber(patch.averageCost))),
               currentPrice:
-                patch.currentPrice === undefined ? holding.currentPrice : Math.max(0, toNumber(patch.currentPrice)),
+                patch.currentPrice === undefined
+                  ? holding.currentPrice
+                  : optionalNumber(patch.currentPrice) == null
+                    ? null
+                    : Math.max(0, Number(optionalNumber(patch.currentPrice))),
               openedAt: patch.openedAt === undefined ? holding.openedAt : patch.openedAt || todayInputDate(),
             }
           : holding
@@ -1923,7 +3370,7 @@ export default function NeuroAnalysisPage() {
 
   function addPortfolioHolding(ticker = focusTicker) {
     const nextTicker = ticker.trim().toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12);
-    setPortfolioHoldings((prev) => [...prev, makeHolding(nextTicker, 0, 0, 0)]);
+    setPortfolioHoldings((prev) => [...prev, makeHolding(nextTicker)]);
   }
 
   function removePortfolioHolding(id: string) {
@@ -2026,7 +3473,7 @@ export default function NeuroAnalysisPage() {
                   "Profiles privados para acciones, ETFs, decisiones de dividendos, valoración y revisión de tesis viva."
                 )}
               </p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-3 sm:items-end">
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 sm:items-end lg:grid-cols-[minmax(220px,1fr)_minmax(180px,0.7fr)_auto_auto]">
                 <input
                   value={caseTitle}
                   onChange={(event) => setCaseTitle(event.target.value)}
@@ -2038,6 +3485,7 @@ export default function NeuroAnalysisPage() {
                   <div className="flex h-10 overflow-hidden rounded-lg border border-sky-500/40 bg-slate-950/70 focus-within:border-sky-300">
                     <input
                       value={focusTickerDraft}
+                      disabled={Boolean(originalInvestmentThesis)}
                       onChange={(event) =>
                         setFocusTickerDraft(event.target.value.toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12))
                       }
@@ -2048,19 +3496,29 @@ export default function NeuroAnalysisPage() {
                         }
                       }}
                       aria-label={L("Active ticker", "Ticker activo")}
-                      className="min-w-0 flex-1 bg-transparent px-3 text-sm font-semibold text-slate-100 outline-none"
+                      title={originalInvestmentThesis ? L("Original thesis ticker is locked", "El ticker de la tesis original está bloqueado") : undefined}
+                      className="min-w-0 flex-1 bg-transparent px-3 text-sm font-semibold text-slate-100 outline-none disabled:cursor-not-allowed disabled:text-slate-500"
                     />
                     <button
                       type="button"
                       onClick={() => applyFocusTicker()}
+                      disabled={Boolean(originalInvestmentThesis)}
                       aria-label={L("Load company profile", "Cargar profile de compañía")}
                       title={L("Load company profile", "Cargar profile de compañía")}
-                      className="inline-flex w-10 shrink-0 items-center justify-center border-l border-slate-800 text-sky-300 hover:bg-sky-400/10 hover:text-sky-100"
+                      className="inline-flex w-10 shrink-0 items-center justify-center border-l border-slate-800 text-sky-300 hover:bg-sky-400/10 hover:text-sky-100 disabled:cursor-not-allowed disabled:text-slate-600"
                     >
                       <Search className="h-4 w-4" />
                     </button>
                   </div>
                 </label>
+                <button
+                  type="button"
+                  onClick={() => startNewResearchCase()}
+                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-sky-500/40 bg-sky-500/5 px-3 py-2 text-xs font-semibold text-sky-100 hover:bg-sky-500/10"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {L("New case", "Nuevo caso")}
+                </button>
                 <button
                   type="button"
                   onClick={() => void saveResearchCase()}
@@ -2087,9 +3545,19 @@ export default function NeuroAnalysisPage() {
         >
           {[
             {
+              id: "daily_office" as const,
+              icon: CalendarClock,
+              title: L("Daily Office", "Oficina Diaria"),
+            },
+            {
               id: "research" as const,
               icon: Search,
               title: L("Profiles", "Profiles"),
+            },
+            {
+              id: "committee" as const,
+              icon: ShieldCheck,
+              title: L("Investment Committee", "Comité de Inversión"),
             },
             {
               id: "fund_plan" as const,
@@ -2122,6 +3590,501 @@ export default function NeuroAnalysisPage() {
           })}
         </nav>
 
+        <div className={activeWorkspaceTab === "daily_office" ? "" : "hidden"}>
+          <DailyInvestmentOfficePanel isEs={isEs} />
+        </div>
+
+        <section className={activeWorkspaceTab === "committee" ? "space-y-4" : "hidden"}>
+          <div className="border-y border-cyan-400/25 bg-cyan-400/5 px-4 py-5 sm:px-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-4xl">
+                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-cyan-300">
+                  {L("Human governance gate", "Compuerta de gobernanza humana")}
+                </p>
+                <h1 className="mt-2 text-xl font-semibold text-slate-50">
+                  {L("Research cannot approve a portfolio position.", "Research no puede aprobar una posición de cartera.")}
+                </h1>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  {L(
+                    "Neuro prepares the evidence packet. An authenticated human reviews one frozen version and records the final committee decision. APPROVED makes the proposal eligible for manual portfolio creation; it never executes or creates a position automatically.",
+                    "Neuro prepara el packet de evidencia. Una persona autenticada revisa una versión congelada y registra la decisión final del comité. APPROVED hace la propuesta elegible para crear manualmente una posición; nunca ejecuta ni crea una posición automáticamente."
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void createInvestmentCommitteePacket()}
+                disabled={committeeGenerating || !activeCaseId || !activeReportId}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {committeeGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                {committeeGenerating
+                  ? L("Preparing packet", "Preparando packet")
+                  : committeePackets.length
+                    ? L("Create new version", "Crear nueva versión")
+                    : L("Create committee packet", "Crear packet del comité")}
+              </button>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+              <Readout
+                label={L("Research report", "Reporte de research")}
+                value={activeReportId ? L("Frozen", "Congelado") : L("Required", "Requerido")}
+                hint={activeReportId ? activeReportId.slice(0, 8) : L("Run Neuro first", "Corre Neuro primero")}
+              />
+              <Readout
+                label={L("Packet version", "Versión del packet")}
+                value={selectedCommitteePacket ? `v${selectedCommitteePacket.version}` : "-"}
+                hint={selectedCommitteePacket?.generation_status ?? L("Not created", "No creado")}
+              />
+              <Readout
+                label={L("Human decision", "Decisión humana")}
+                value={selectedCommitteePacketDecision?.decision?.replaceAll("_", " ") ?? L("Pending", "Pendiente")}
+                hint={selectedCommitteePacketDecision ? L("Immutable", "Inmutable") : L("AI cannot decide", "AI no puede decidir")}
+              />
+              <Readout
+                label={L("Portfolio eligibility", "Elegibilidad de cartera")}
+                value={selectedCommitteePacketDecision?.portfolio_eligible ? L("Eligible", "Elegible") : L("Blocked", "Bloqueada")}
+                hint={L("No automatic execution", "Sin ejecución automática")}
+              />
+              <Readout
+                label={L("Original thesis", "Tesis original")}
+                value={originalInvestmentThesis ? L("Frozen", "Congelada") : L("Not recorded", "No registrada")}
+                hint={originalInvestmentThesis ? originalInvestmentThesis.content_hash.slice(0, 10) : L("Requires real purchase", "Requiere compra real")}
+              />
+            </div>
+            {committeeStatus ? <p className="mt-4 text-sm text-emerald-200">{committeeStatus}</p> : null}
+            {committeeError ? <p className="mt-4 text-sm text-rose-200">{committeeError}</p> : null}
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.55fr)]">
+            <div className="min-w-0 rounded-xl border border-slate-800 bg-slate-900/75 p-4 sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    {L("Investment Committee Packet", "Packet del Comité de Inversión")}
+                  </p>
+                  <h2 className="mt-1 text-lg font-semibold text-slate-50">
+                    {selectedCommitteePacket
+                      ? `${selectedCommitteePacket.ticker} / v${selectedCommitteePacket.version}`
+                      : L("No packet selected", "No hay packet seleccionado")}
+                  </h2>
+                </div>
+                {committeePackets.length ? (
+                  <label className="block min-w-[220px]">
+                    <span className="sr-only">{L("Packet version", "Versión del packet")}</span>
+                    <select
+                      value={selectedCommitteePacket?.id ?? ""}
+                      onChange={(event) => setSelectedCommitteePacketId(event.target.value || null)}
+                      className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-cyan-300"
+                    >
+                      {committeePackets.map((packet) => {
+                        const decision = committeeDecisions.find((item) => item.packet_id === packet.id);
+                        return (
+                          <option key={packet.id} value={packet.id}>
+                            v{packet.version} / {decision?.decision?.replaceAll("_", " ") ?? L("PENDING", "PENDIENTE")}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+
+              {committeeLoading ? (
+                <div className="mt-8 flex items-center justify-center gap-2 py-16 text-sm text-slate-400">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {L("Loading committee record", "Cargando expediente del comité")}
+                </div>
+              ) : !selectedCommitteePacket ? (
+                <div className="mt-6 border-y border-slate-800 py-12 text-center">
+                  <FileText className="mx-auto h-8 w-8 text-slate-600" />
+                  <p className="mt-3 text-sm font-semibold text-slate-200">
+                    {L("Create the first packet from a saved Neuro report.", "Crea el primer packet desde un reporte Neuro guardado.")}
+                  </p>
+                  <p className="mx-auto mt-2 max-w-xl text-xs leading-5 text-slate-500">
+                    {L(
+                      "The packet freezes the report, model, policy, evidence, sources, and dates reviewed by the committee.",
+                      "El packet congela el reporte, modelo, policy, evidencia, fuentes y fechas revisadas por el comité."
+                    )}
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {COMMITTEE_SECTION_KEYS.map((section) => (
+                    <article
+                      key={section}
+                      className={`rounded-lg border border-slate-800 bg-slate-950/50 p-4 ${
+                        section === "executiveSummary" || section === "investmentThesis" ? "lg:col-span-2" : ""
+                      }`}
+                    >
+                      <h3 className="text-sm font-semibold text-slate-100">{committeeSectionLabels[section]}</h3>
+                      <div className="mt-3 space-y-3">
+                        {(selectedCommitteePacket.packet?.[section] ?? []).map((claim, index) => (
+                          <div key={`${section}-${index}`} className="border-l border-slate-700 pl-3">
+                            <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-bold ${committeeClassificationTone(claim.classification)}`}>
+                              {claim.classification.replaceAll("_", " ")}
+                            </span>
+                            <p className="mt-2 text-sm leading-6 text-slate-300">{claim.text}</p>
+                            <p className="mt-2 text-[11px] leading-5 text-slate-500">
+                              {claim.sourceIds
+                                .map((id) => committeeSourceMap.get(id)?.title ?? id)
+                                .join(" · ")} / {new Date(claim.asOfDate).toLocaleDateString(localeTag)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <aside className="space-y-4 xl:sticky xl:top-24 xl:self-start">
+              <div className="rounded-xl border border-cyan-400/30 bg-slate-900/80 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-300">
+                      USER DECISION
+                    </p>
+                    <h2 className="mt-1 text-base font-semibold text-slate-50">
+                      {L("Authorized human review", "Revisión humana autorizada")}
+                    </h2>
+                  </div>
+                  <ShieldCheck className="h-5 w-5 text-cyan-300" />
+                </div>
+
+                {selectedCommitteePacketDecision ? (
+                  <div className={`mt-4 rounded-lg border p-4 ${committeeDecisionTone(selectedCommitteePacketDecision.decision)}`}>
+                    <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-bold ${committeeClassificationTone("USER_DECISION")}`}>
+                      USER DECISION
+                    </span>
+                    <p className="mt-3 text-lg font-semibold">{selectedCommitteePacketDecision.decision.replaceAll("_", " ")}</p>
+                    <p className="mt-2 text-sm leading-6 opacity-85">{selectedCommitteePacketDecision.rationale}</p>
+                    {selectedCommitteePacketDecision.conditions ? (
+                      <p className="mt-3 border-t border-current/20 pt-3 text-xs leading-5 opacity-75">
+                        {selectedCommitteePacketDecision.conditions}
+                      </p>
+                    ) : null}
+                    <p className="mt-3 text-[11px] opacity-65">
+                      {selectedCommitteePacketDecision.decision_maker_email || L("Authenticated owner", "Dueño autenticado")} / {new Date(selectedCommitteePacketDecision.decided_at).toLocaleString(localeTag)}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                      {COMMITTEE_DECISIONS.map((decision) => (
+                        <button
+                          key={decision}
+                          type="button"
+                          onClick={() => setCommitteeDecision(decision)}
+                          disabled={decision === "APPROVED" && !selectedCommitteeResearchDossiersReady}
+                          className={`min-h-10 rounded-lg border px-3 py-2 text-left text-xs font-semibold ${
+                            committeeDecision === decision
+                              ? committeeDecisionTone(decision)
+                              : "border-slate-800 bg-slate-950/50 text-slate-300 hover:border-cyan-400"
+                          } disabled:cursor-not-allowed disabled:opacity-40`}
+                        >
+                          {decision.replaceAll("_", " ")}
+                        </button>
+                      ))}
+                    </div>
+                    {!selectedCommitteeResearchDossiersReady ? (
+                      <p className="border-l-2 border-amber-300 pl-3 text-xs leading-5 text-amber-100/80">
+                        {L(
+                          "APPROVED remains blocked until this packet contains completed Business Quality, Management & Capital Allocation, Earnings Quality, and Independent Bear Case dossiers. Other human outcomes remain available.",
+                          "APPROVED permanece bloqueado hasta que este packet contenga los expedientes completos de Calidad del Negocio, Gerencia y Asignación de Capital, Calidad de Ganancias y Caso Bajista Independiente. Las demás decisiones humanas siguen disponibles."
+                        )}
+                      </p>
+                    ) : null}
+                    <textarea
+                      value={committeeRationale}
+                      onChange={(event) => setCommitteeRationale(event.target.value)}
+                      rows={4}
+                      placeholder={L("Human rationale (required)", "Justificación humana (requerida)")}
+                      className="w-full resize-none rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm leading-6 text-slate-100 outline-none focus:border-cyan-300"
+                    />
+                    <textarea
+                      value={committeeConditions}
+                      onChange={(event) => setCommitteeConditions(event.target.value)}
+                      rows={3}
+                      placeholder={L("Conditions, monitoring triggers, or next evidence", "Condiciones, alertas o próxima evidencia")}
+                      className="w-full resize-none rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm leading-6 text-slate-100 outline-none focus:border-cyan-300"
+                    />
+                    <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-800 bg-slate-950/45 p-3">
+                      <input
+                        type="checkbox"
+                        checked={committeeHumanConfirmed}
+                        onChange={(event) => setCommitteeHumanConfirmed(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 accent-cyan-300"
+                      />
+                      <span className="text-xs leading-5 text-slate-300">
+                        {L(
+                          "I am the authenticated human decision maker. I reviewed this exact packet version; this is not an AI decision.",
+                          "Soy la persona autenticada que toma la decisión. Revisé esta versión exacta; esto no es una decisión de AI."
+                        )}
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void recordInvestmentCommitteeDecision()}
+                      disabled={
+                        committeeSavingDecision ||
+                        !selectedCommitteePacket ||
+                        (committeeDecision === "APPROVED" && !selectedCommitteeResearchDossiersReady) ||
+                        !committeeHumanConfirmed ||
+                        committeeRationale.trim().length < 12
+                      }
+                      className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {committeeSavingDecision ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                      {L("Record immutable decision", "Registrar decisión inmutable")}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {originalInvestmentThesis ? (
+                <div className="rounded-xl border border-emerald-400/35 bg-slate-900/80 p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-300">
+                        {L("Permanent original thesis", "Tesis original permanente")}
+                      </p>
+                      <h2 className="mt-1 text-base font-semibold text-slate-50">
+                        {originalInvestmentThesis.ticker} / {L("Purchase baseline", "Base de compra")}
+                      </h2>
+                    </div>
+                    <LockKeyhole className="h-5 w-5 shrink-0 text-emerald-300" />
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-y border-slate-800 py-4 text-xs">
+                    <div>
+                      <p className="text-slate-500">{L("Purchase date", "Fecha de compra")}</p>
+                      <p className="mt-1 font-semibold text-slate-100">{new Date(`${originalInvestmentThesis.purchase_date}T00:00:00`).toLocaleDateString(localeTag)}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-500">{L("Purchase price", "Precio de compra")}</p>
+                      <p className="mt-1 font-semibold text-slate-100">{formatCurrency(originalInvestmentThesis.purchase_price, localeTag)}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-500">{L("Portfolio weight", "Peso en cartera")}</p>
+                      <p className="mt-1 font-semibold text-slate-100">{Number(originalInvestmentThesis.portfolio_weight_pct).toFixed(2)}%</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-500">{L("Committee decision", "Decisión del comité")}</p>
+                      <p className="mt-1 font-semibold text-emerald-200">APPROVED</p>
+                    </div>
+                  </div>
+                  <details className="group mt-4 border-b border-slate-800 pb-4">
+                    <summary className="cursor-pointer text-xs font-semibold text-slate-200">
+                      {L("View the exact frozen record", "Ver el registro congelado exacto")}
+                    </summary>
+                    <div className="mt-4 space-y-4 text-xs leading-5 text-slate-300">
+                      {[
+                        [L("Investment thesis", "Tesis de inversión"), originalInvestmentThesis.investment_thesis],
+                        [L("Expected business developments", "Desarrollos esperados del negocio"), originalInvestmentThesis.expected_business_developments],
+                        [L("Major risks", "Riesgos principales"), originalInvestmentThesis.major_risks],
+                        [L("Expected catalysts", "Catalizadores esperados"), originalInvestmentThesis.expected_catalysts],
+                        [L("Invalidation conditions", "Condiciones de invalidación"), originalInvestmentThesis.invalidation_conditions],
+                      ].map(([label, claims]) => (
+                        <div key={String(label)}>
+                          <p className="font-semibold uppercase text-slate-500">{String(label)}</p>
+                          <ul className="mt-1 space-y-1">
+                            {(claims as OriginalInvestmentThesisRecord["investment_thesis"]).map((claim, index) => (
+                              <li key={`${String(label)}-${index}`}>• {claim.text}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                      <div>
+                        <p className="font-semibold uppercase text-slate-500">{L("Valuation assumptions", "Supuestos de valoración")}</p>
+                        <ul className="mt-1 space-y-1">
+                          {(originalInvestmentThesis.valuation_assumptions?.committeeClaims ?? []).map((claim, index) => (
+                            <li key={`valuation-${index}`}>• {claim.text}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="font-semibold uppercase text-slate-500">{L("Key metrics to monitor", "Métricas clave a monitorear")}</p>
+                        <ul className="mt-1 space-y-1">
+                          {(originalInvestmentThesis.key_metrics_to_monitor ?? []).map((metric, index) => (
+                            <li key={`metric-${index}`}>• {metric.metric}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="font-semibold uppercase text-slate-500">{L("Supporting documents", "Documentos de soporte")}</p>
+                        <ul className="mt-1 space-y-1">
+                          {(originalInvestmentThesis.supporting_documents ?? []).map((source) => (
+                            <li key={source.id}>• {source.title}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </details>
+                  <p className="mt-3 break-all font-mono text-[10px] leading-4 text-slate-600">
+                    SHA-256 {originalInvestmentThesis.content_hash}
+                  </p>
+                  <p className="mt-2 text-[11px] leading-5 text-slate-500">
+                    {L(
+                      "The original is never overwritten. Future research creates separate comparisons against this baseline.",
+                      "El original nunca se sobrescribe. El research futuro crea comparaciones separadas contra esta base."
+                    )}
+                  </p>
+                  {thesisFreezeStatus ? <p className="mt-3 text-xs text-emerald-200">{thesisFreezeStatus}</p> : null}
+                </div>
+              ) : selectedCommitteePacketDecision?.decision === "APPROVED" ? (
+                <div className="rounded-xl border border-emerald-400/35 bg-slate-900/80 p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-300">
+                        {L("Record the real purchase", "Registrar la compra real")}
+                      </p>
+                      <h2 className="mt-1 text-base font-semibold text-slate-50">
+                        {L("Freeze the original thesis", "Congelar la tesis original")}
+                      </h2>
+                    </div>
+                    <LockKeyhole className="h-5 w-5 shrink-0 text-emerald-300" />
+                  </div>
+                  <p className="mt-3 text-xs leading-5 text-slate-400">
+                    {L(
+                      "Use the actual external purchase details. This records the position baseline; it does not place a trade.",
+                      "Usa los datos reales de la compra externa. Esto registra la base de la posición; no ejecuta un trade."
+                    )}
+                  </p>
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                    <label className="text-xs text-slate-400">
+                      {L("Purchase date", "Fecha de compra")}
+                      <input
+                        type="date"
+                        max={new Date().toISOString().slice(0, 10)}
+                        value={thesisPurchaseDate}
+                        onChange={(event) => setThesisPurchaseDate(event.target.value)}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-slate-100 outline-none focus:border-emerald-300"
+                      />
+                    </label>
+                    <label className="text-xs text-slate-400">
+                      {L("Purchase price", "Precio de compra")}
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={thesisPurchasePrice}
+                        onChange={(event) => setThesisPurchasePrice(event.target.value)}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-slate-100 outline-none focus:border-emerald-300"
+                      />
+                    </label>
+                    <label className="text-xs text-slate-400">
+                      {L("Portfolio weight (%)", "Peso en cartera (%)")}
+                      <input
+                        type="number"
+                        min="0.01"
+                        max="100"
+                        step="0.01"
+                        value={thesisPortfolioWeightPct}
+                        onChange={(event) => setThesisPortfolioWeightPct(event.target.value)}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-slate-100 outline-none focus:border-emerald-300"
+                      />
+                    </label>
+                  </div>
+                  <label className="mt-4 flex cursor-pointer items-start gap-3 border-y border-slate-800 py-3">
+                    <input
+                      type="checkbox"
+                      checked={thesisFreezeConfirmed}
+                      onChange={(event) => setThesisFreezeConfirmed(event.target.checked)}
+                      className="mt-0.5 h-4 w-4 accent-emerald-300"
+                    />
+                    <span className="text-xs leading-5 text-slate-300">
+                      {L(
+                        "These are the real purchase details. I understand that the original thesis and reviewed committee decision will be permanent.",
+                        "Estos son los datos reales de compra. Entiendo que la tesis original y la decisión revisada del comité serán permanentes."
+                      )}
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void freezeOriginalInvestmentThesis()}
+                    disabled={
+                      thesisFreezeLoading ||
+                      !thesisFreezeConfirmed ||
+                      !thesisPurchaseDate ||
+                      Number(thesisPurchasePrice) <= 0 ||
+                      Number(thesisPortfolioWeightPct) <= 0 ||
+                      Number(thesisPortfolioWeightPct) > 100
+                    }
+                    className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-emerald-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {thesisFreezeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LockKeyhole className="h-4 w-4" />}
+                    {L("Freeze original thesis", "Congelar tesis original")}
+                  </button>
+                  {thesisFreezeStatus ? <p className="mt-3 text-xs text-emerald-200">{thesisFreezeStatus}</p> : null}
+                  {thesisFreezeError ? <p className="mt-3 text-xs text-rose-200">{thesisFreezeError}</p> : null}
+                </div>
+              ) : null}
+
+              <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
+                <h2 className="text-sm font-semibold text-slate-100">{L("Version history", "Historial de versiones")}</h2>
+                <div className="mt-3 space-y-2">
+                  {committeePackets.map((packet) => {
+                    const decision = committeeDecisions.find((item) => item.packet_id === packet.id);
+                    return (
+                      <button
+                        key={packet.id}
+                        type="button"
+                        onClick={() => setSelectedCommitteePacketId(packet.id)}
+                        className={`w-full rounded-lg border p-3 text-left ${
+                          selectedCommitteePacket?.id === packet.id
+                            ? "border-cyan-300/60 bg-cyan-300/5"
+                            : "border-slate-800 bg-slate-950/45 hover:border-slate-600"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-semibold text-slate-100">v{packet.version}</span>
+                          <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${committeeDecisionTone(decision?.decision)}`}>
+                            {decision?.decision?.replaceAll("_", " ") ?? L("PENDING", "PENDIENTE")}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-[11px] text-slate-500">{new Date(packet.created_at).toLocaleString(localeTag)}</p>
+                      </button>
+                    );
+                  })}
+                  {!committeePackets.length ? (
+                    <p className="text-xs leading-5 text-slate-500">{L("No packet versions yet.", "Aún no hay versiones.")}</p>
+                  ) : null}
+                </div>
+              </div>
+
+              {selectedCommitteePacket ? (
+                <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
+                  <h2 className="text-sm font-semibold text-slate-100">{L("Frozen sources", "Fuentes congeladas")}</h2>
+                  <div className="mt-3 max-h-72 space-y-2 overflow-auto pr-1">
+                    {(selectedCommitteePacket.source_manifest ?? []).map((source) => (
+                      <div key={source.id} className="rounded-lg border border-slate-800 bg-slate-950/45 p-3">
+                        <p className="text-xs font-semibold text-slate-200">{source.title}</p>
+                        <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                          {source.sourceType.replaceAll("_", " ")} / {source.documentDate ? new Date(source.documentDate).toLocaleDateString(localeTag) : L("retrieval date", "fecha de consulta")} / {new Date(source.accessedAt).toLocaleDateString(localeTag)}
+                        </p>
+                        {source.url ? (
+                          <a
+                            href={source.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-cyan-300 hover:text-cyan-100"
+                          >
+                            {L("Open source", "Abrir fuente")} <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-3 break-all font-mono text-[10px] leading-4 text-slate-600">
+                    SHA-256 {selectedCommitteePacket.content_hash}
+                  </p>
+                </div>
+              ) : null}
+            </aside>
+          </div>
+        </section>
+
         <section className={activeWorkspaceTab === "research" ? "grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]" : "hidden"}>
           <div className="rounded-xl border border-emerald-500/25 bg-slate-900/85 p-5 shadow-lg shadow-slate-950/20">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -2147,7 +4110,7 @@ export default function NeuroAnalysisPage() {
             <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-6">
               <Readout label={L("Mirror NAV", "NAV espejo")} value={formatCompactCurrency(portfolioSummary.totalValue, localeTag)} />
               <Readout label={L("Annualized", "Anualizado")} value={formatPercent(portfolioSummary.annualizedReturn, localeTag)} />
-              <Readout label={BENCHMARK_TICKER} value={formatPercent(benchmarkAnnualizedReturn, localeTag)} hint={L("Benchmark", "Benchmark")} />
+              <Readout label={configuredBenchmarkTicker} value={formatPercent(benchmarkAnnualizedReturn, localeTag)} hint={L("Benchmark", "Benchmark")} />
               <Readout label={L("Alpha", "Alpha")} value={formatPercent(portfolioAlpha, localeTag)} />
               <Readout label={L("Income yield", "Yield ingreso")} value={formatPercent(portfolioSummary.incomeYield, localeTag)} />
               <Readout label={L("Readiness", "Preparación")} value={`${readinessScore}%`} />
@@ -2163,13 +4126,15 @@ export default function NeuroAnalysisPage() {
                         <span className="font-semibold text-slate-100">{row.ticker}</span>
                         <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
                           <div
-                            className={row.pnl >= 0 ? "h-full rounded-full bg-emerald-400" : "h-full rounded-full bg-rose-400"}
+                            className={Number(row.pnl) >= 0 ? "h-full rounded-full bg-emerald-400" : "h-full rounded-full bg-rose-400"}
                             style={{
-                              width: `${Math.min(100, Math.max(6, Math.abs(row.pnlPct ?? 0) * 100))}%`,
+                              width: row.pnlPct == null
+                                ? "0%"
+                                : `${Math.min(100, Math.max(6, Math.abs(row.pnlPct) * 100))}%`,
                             }}
                           />
                         </div>
-                        <span className={row.pnl >= 0 ? "font-semibold text-emerald-300" : "font-semibold text-rose-300"}>
+                        <span className={Number(row.pnl) >= 0 ? "font-semibold text-emerald-300" : "font-semibold text-rose-300"}>
                           {formatPercent(row.pnlPct, localeTag)}
                         </span>
                       </div>
@@ -2215,7 +4180,7 @@ export default function NeuroAnalysisPage() {
                       <span className="text-amber-200">{(row.missing ?? []).join(", ")}</span>
                     </div>
                     <p className="mt-1 text-amber-100/75">
-                      {L("Upload or index the missing evidence before treating the verdict as high confidence.", "Sube o indexa la evidencia faltante antes de tratar el veredicto como alta confianza.")}
+                      {L("Upload or index the missing evidence before treating the verdict as sufficiently supported.", "Sube o indexa la evidencia faltante antes de tratar el veredicto como suficientemente respaldado.")}
                     </p>
                   </div>
                 ))
@@ -2227,6 +4192,416 @@ export default function NeuroAnalysisPage() {
             </div>
           </div>
         </section>
+
+        {originalInvestmentThesis ? (
+          <section className={activeWorkspaceTab === "research" ? "rounded-xl border border-emerald-400/30 bg-slate-900/85 p-4 shadow-lg shadow-slate-950/20 sm:p-5" : "hidden"}>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-4xl">
+                <div className="flex items-center gap-2">
+                  <LockKeyhole className="h-4 w-4 text-emerald-300" />
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-300">
+                    {L("Original Thesis Monitor", "Monitor de Tesis Original")}
+                  </p>
+                </div>
+                <h2 className="mt-2 text-lg font-semibold text-slate-50">
+                  {L(
+                    "Current facts versus the purchase-date thesis",
+                    "Hechos actuales versus la tesis de la fecha de compra"
+                  )}
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  {L(
+                    "The purchase baseline remains immutable. Every future Neuro run creates a separate, source-linked status review.",
+                    "La base de compra permanece inmutable. Cada análisis futuro de Neuro crea una revisión separada con fuentes."
+                  )}
+                </p>
+              </div>
+              <span className={`inline-flex min-h-9 items-center self-start rounded-full border px-3 py-2 text-xs font-bold ${thesisClassificationTone(investmentThesisReview?.classification)}`}>
+                {investmentThesisReview?.classification?.replaceAll("_", " ") ?? L("RUN CURRENT REVIEW", "CORRE REVISIÓN ACTUAL")}
+              </span>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Readout label={L("Original frozen", "Original congelada")} value={new Date(originalInvestmentThesis.created_at).toLocaleDateString(localeTag)} hint={originalInvestmentThesis.content_hash.slice(0, 10)} />
+              <Readout label={L("Purchase price", "Precio de compra")} value={formatCurrency(originalInvestmentThesis.purchase_price, localeTag)} hint={originalInvestmentThesis.purchase_date} />
+              <Readout label={L("Original weight", "Peso original")} value={`${Number(originalInvestmentThesis.portfolio_weight_pct).toFixed(2)}%`} />
+              <Readout label={L("Review history", "Historial de revisiones")} value={investmentThesisReviewHistory.length} hint={L("Append-only", "Solo añade")}/>
+            </div>
+            {investmentThesisReviewHistory.length ? (
+              <div className="mt-4 flex flex-wrap gap-2 border-y border-slate-800 py-3">
+                {investmentThesisReviewHistory.slice(0, 8).map((review) => {
+                  const linkedReport = reports.find((report) => report.id === review.report_id);
+                  return (
+                    <button
+                      key={review.id}
+                      type="button"
+                      onClick={() => {
+                        if (linkedReport) openSavedReport(linkedReport);
+                        setInvestmentThesisReview(thesisReviewFromRecord(review, originalInvestmentThesis));
+                      }}
+                      className={`rounded-full border px-3 py-1.5 text-[10px] font-semibold ${thesisClassificationTone(review.classification)}`}
+                      title={review.summary}
+                    >
+                      {new Date(review.created_at).toLocaleDateString(localeTag)} / {review.classification.replace("THESIS_", "").replaceAll("_", " ")}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {investmentThesisReview ? (
+              <div className="mt-5 border-t border-slate-800 pt-5">
+                <p className="text-sm leading-6 text-slate-200">{investmentThesisReview.summary}</p>
+                <p className="mt-2 text-xs font-semibold text-slate-500">
+                  {L(
+                    "Thesis-status classification only. It is not an automatic trading decision.",
+                    "Es solo una clasificación del estado de la tesis. No es una decisión automática de trading."
+                  )}
+                </p>
+                {investmentThesisReview.classificationEvidence.length ? (
+                  <div className="mt-4 border-l-2 border-cyan-400 pl-4">
+                    <p className="text-[11px] font-semibold uppercase text-cyan-200">
+                      {L("Classification evidence", "Evidencia de la clasificación")}
+                    </p>
+                    <div className="mt-2 space-y-1 text-xs leading-5 text-slate-400">
+                      {investmentThesisReview.classificationEvidence.map((evidence, index) => (
+                        <p key={`classification-evidence-${index}`}>
+                          {evidence.statement} {evidence.sourceUrl ? (
+                            <a href={evidence.sourceUrl} target="_blank" rel="noreferrer" className="font-semibold text-cyan-300 hover:text-cyan-100">
+                              [{evidence.sourceLabel} / {evidence.sourceDate ?? L("date unavailable", "fecha no disponible")}]
+                            </a>
+                          ) : (
+                            <span className="text-slate-600">[{evidence.sourceLabel} / {evidence.sourceDate ?? L("date unavailable", "fecha no disponible")}]</span>
+                          )}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="mt-5 space-y-3">
+                  {investmentThesisReview.changes.map((change, index) => (
+                    <article key={`${change.field}-${index}`} className="border-y border-slate-800 bg-slate-950/35 px-4 py-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase text-slate-400">{change.field.replaceAll("_", " ")}</p>
+                        <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${
+                          change.effect === "strengthens"
+                            ? "border-emerald-400/40 text-emerald-200"
+                            : change.effect === "weakens"
+                              ? "border-amber-400/40 text-amber-200"
+                              : change.effect === "invalidates"
+                                ? "border-rose-400/40 text-rose-200"
+                                : "border-slate-700 text-slate-300"
+                        }`}>
+                          {change.effect.toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase text-slate-600">{L("Original expectation", "Expectativa original")}</p>
+                          <p className="mt-1 text-sm leading-6 text-slate-300">{change.originalExpectation}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase text-slate-600">{L("Current documented fact", "Hecho actual documentado")}</p>
+                          <p className="mt-1 text-sm leading-6 text-slate-200">{change.currentFact}</p>
+                        </div>
+                      </div>
+                      <p className="mt-3 text-xs leading-5 text-slate-400">{change.explanation}</p>
+                      {change.matchedInvalidationCondition ? (
+                        <p className="mt-3 border-l-2 border-rose-400 pl-3 text-xs leading-5 text-rose-100">
+                          {L("Matched original invalidation condition", "Condición original de invalidación identificada")}: {change.matchedInvalidationCondition}
+                        </p>
+                      ) : null}
+                      <div className="mt-3 space-y-2 border-t border-slate-800 pt-3">
+                        {change.currentEvidence.map((evidence, evidenceIndex) => (
+                          <div key={`${change.field}-evidence-${evidenceIndex}`} className="flex flex-col gap-1 text-[11px] leading-5 text-slate-500 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                            <span>{evidence.statement}</span>
+                            {evidence.sourceUrl ? (
+                              <a href={evidence.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 font-semibold text-cyan-300 hover:text-cyan-100">
+                                {evidence.sourceLabel} / {evidence.sourceDate ?? L("date unavailable", "fecha no disponible")}
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            ) : (
+                              <span className="shrink-0 text-slate-600">
+                                {evidence.sourceLabel} / {evidence.sourceDate ?? L("date unavailable", "fecha no disponible")}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                  {!investmentThesisReview.changes.length ? (
+                    <p className="border-y border-slate-800 py-5 text-sm text-slate-500">
+                      {L(
+                        "No evidence-backed change could be established in this review.",
+                        "No se pudo establecer un cambio respaldado por evidencia en esta revisión."
+                      )}
+                    </p>
+                  ) : null}
+                </div>
+
+                {investmentThesisReview.missingEvidence.length ? (
+                  <div className="mt-5 border-l-2 border-amber-300 pl-4">
+                    <p className="text-xs font-semibold uppercase text-amber-200">{L("Evidence still needed", "Evidencia pendiente")}</p>
+                    <ul className="mt-2 space-y-1 text-xs leading-5 text-amber-100/75">
+                      {investmentThesisReview.missingEvidence.map((item, index) => <li key={`missing-${index}`}>• {item}</li>)}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="mt-5 flex flex-col gap-3 border-y border-slate-800 py-5 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm leading-6 text-slate-400">
+                  {L(
+                    "Run Neuro with current filings and market evidence to create the first comparison.",
+                    "Corre Neuro con filings y evidencia actual para crear la primera comparación."
+                  )}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void autoBuildEvidenceAndRun()}
+                  disabled={autoRunLoading || agentLoading}
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-emerald-400/50 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/20 disabled:opacity-50"
+                >
+                  {autoRunLoading || agentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                  {L("Run thesis review", "Correr revisión de tesis")}
+                </button>
+              </div>
+            )}
+          </section>
+        ) : null}
+
+        {originalInvestmentThesis ? (
+          <section className={activeWorkspaceTab === "research" ? "rounded-xl border border-cyan-400/25 bg-slate-900/85 p-4 shadow-lg shadow-slate-950/20 sm:p-5" : "hidden"}>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-4xl">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 text-cyan-300" />
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-cyan-300">
+                    {L("Position Exit Review", "Revisión de Salida de Posición")}
+                  </p>
+                </div>
+                <h2 className="mt-2 text-lg font-semibold text-slate-50">
+                  {L("What changed since the original decision?", "¿Qué cambió desde la decisión original?")}
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  {L(
+                    "Before a position is reconsidered, Neuro compares the frozen thesis, valuation, and financial expectations with current documented evidence. Only a human can decide what to do next.",
+                    "Antes de reconsiderar una posición, Neuro compara la tesis, valoración y expectativas financieras congeladas con evidencia actual documentada. Solo una persona decide qué hacer después."
+                  )}
+                </p>
+              </div>
+              <span className={`inline-flex min-h-9 max-w-full items-center self-start rounded-full border px-3 py-2 text-xs font-bold ${positionExitStatusTone(positionExitReview?.status)}`}>
+                {positionExitReview?.status.replaceAll("_", " ") ?? L("RUN CURRENT REVIEW", "CORRE REVISIÓN ACTUAL")}
+              </span>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Readout
+                label={L("Primary reason", "Motivo principal")}
+                value={positionExitReasonLabel(positionExitReview?.primaryReason, isEs)}
+              />
+              <Readout
+                label={L("Purchase price", "Precio de compra")}
+                value={formatCurrency(originalInvestmentThesis.purchase_price, localeTag)}
+                hint={originalInvestmentThesis.purchase_date}
+              />
+              <Readout
+                label={L("Current price", "Precio actual")}
+                value={
+                  positionExitReview?.priceMovementAssessment.currentPrice != null
+                    ? formatCurrency(positionExitReview.priceMovementAssessment.currentPrice, localeTag)
+                    : L("Unavailable", "No disponible")
+                }
+                hint={
+                  positionExitReview?.priceMovementAssessment.changePct != null
+                    ? `${positionExitReview.priceMovementAssessment.changePct >= 0 ? "+" : ""}${positionExitReview.priceMovementAssessment.changePct.toFixed(1)}%`
+                    : undefined
+                }
+              />
+              <Readout
+                label={L("Review history", "Historial de revisiones")}
+                value={positionExitReviewHistory.length}
+                hint={L("Append-only", "Solo añade")}
+              />
+            </div>
+
+            {positionExitReviewHistory.length ? (
+              <div className="mt-4 flex flex-wrap gap-2 border-y border-slate-800 py-3">
+                {positionExitReviewHistory.slice(0, 8).map((review) => {
+                  const linkedReport = reports.find((report) => report.id === review.report_id);
+                  return (
+                    <button
+                      key={review.id}
+                      type="button"
+                      onClick={() => {
+                        if (linkedReport) openSavedReport(linkedReport);
+                        setPositionExitReview(positionExitReviewFromRecord(review, originalInvestmentThesis));
+                      }}
+                      className={`rounded-full border px-3 py-1.5 text-[10px] font-semibold ${positionExitStatusTone(review.review_status)}`}
+                      title={review.summary}
+                    >
+                      {new Date(review.created_at).toLocaleDateString(localeTag)} / {review.primary_reason ? positionExitReasonLabel(review.primary_reason, isEs) : review.review_status.replaceAll("_", " ")}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {positionExitReview ? (
+              <div className="mt-5 border-t border-slate-800 pt-5">
+                <p className="text-sm leading-6 text-slate-200">{positionExitReview.summary}</p>
+                <div className="mt-3 border-l-2 border-cyan-400 pl-4">
+                  <p className="text-xs font-semibold text-cyan-100">
+                    {positionExitReview.priceMovementAssessment.conclusion}
+                  </p>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                    {L(
+                      "Price movement is displayed as context only. It cannot classify thesis success, thesis failure, or an exit reason by itself.",
+                      "El movimiento de precio se muestra solo como contexto. Por sí solo no puede clasificar éxito, fracaso de tesis ni un motivo de salida."
+                    )}
+                  </p>
+                </div>
+
+                <div className="mt-5 grid grid-cols-1 border-y border-slate-800 lg:grid-cols-3 lg:divide-x lg:divide-slate-800">
+                  {positionExitReview.comparisons.map((comparison) => {
+                    const comparisonLabel =
+                      comparison.type === "ORIGINAL_THESIS_VS_CURRENT_EVIDENCE"
+                        ? L("Thesis vs evidence", "Tesis vs evidencia")
+                        : comparison.type === "ORIGINAL_VALUATION_VS_CURRENT_VALUATION"
+                          ? L("Valuation vs valuation", "Valoración vs valoración")
+                          : L("Expectations vs results", "Expectativas vs resultados");
+                    return (
+                      <article key={comparison.type} className="px-0 py-4 lg:px-4 lg:first:pl-0 lg:last:pr-0">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-[11px] font-bold uppercase text-cyan-200">{comparisonLabel}</p>
+                          <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${
+                            comparison.materiality === "material"
+                              ? "border-amber-400/40 text-amber-200"
+                              : comparison.materiality === "not_material"
+                                ? "border-emerald-400/40 text-emerald-200"
+                                : "border-slate-700 text-slate-400"
+                          }`}>
+                            {comparison.materiality.replaceAll("_", " ").toUpperCase()}
+                          </span>
+                        </div>
+                        <p className="mt-3 text-[10px] font-semibold uppercase text-slate-600">{L("Original", "Original")}</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-400">{comparison.originalBaseline}</p>
+                        <p className="mt-3 text-[10px] font-semibold uppercase text-slate-600">{L("Current", "Actual")}</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-300">{comparison.currentObservation}</p>
+                        <p className="mt-3 text-xs font-semibold leading-5 text-slate-200">{comparison.change}</p>
+                        {comparison.uncertainty ? (
+                          <p className="mt-2 text-[11px] leading-5 text-slate-500">
+                            {L("Uncertainty", "Incertidumbre")}: {comparison.uncertainty}
+                          </p>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+
+                {positionExitReview.whatChanged.length ? (
+                  <div className="mt-5 space-y-3">
+                    {positionExitReview.whatChanged.map((change, index) => (
+                      <article key={`${change.reason}-${index}`} className="border-y border-slate-800 bg-slate-950/35 px-4 py-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase text-slate-300">
+                            {positionExitReasonLabel(change.reason, isEs)}
+                          </p>
+                          <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${
+                            change.materiality === "material"
+                              ? "border-amber-400/40 text-amber-200"
+                              : change.materiality === "not_material"
+                                ? "border-emerald-400/40 text-emerald-200"
+                                : "border-slate-700 text-slate-400"
+                          }`}>
+                            {change.materiality.replaceAll("_", " ").toUpperCase()}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm font-semibold text-slate-100">{change.change}</p>
+                        <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase text-slate-600">{L("Original baseline", "Base original")}</p>
+                            <p className="mt-1 text-xs leading-5 text-slate-400">{change.originalBaseline}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase text-slate-600">{L("Current evidence", "Evidencia actual")}</p>
+                            <p className="mt-1 text-xs leading-5 text-slate-300">{change.currentObservation}</p>
+                          </div>
+                        </div>
+                        <p className="mt-3 text-xs leading-5 text-slate-400">{change.explanation}</p>
+                        {change.matchedInvalidationCondition ? (
+                          <p className="mt-3 border-l-2 border-rose-400 pl-3 text-xs leading-5 text-rose-100">
+                            {L("Matched original invalidation condition", "Condición original de invalidación identificada")}: {change.matchedInvalidationCondition}
+                          </p>
+                        ) : null}
+                        <div className="mt-3 space-y-2 border-t border-slate-800 pt-3">
+                          {change.currentEvidence.map((evidence, evidenceIndex) => (
+                            <div key={`${change.reason}-evidence-${evidenceIndex}`} className="flex flex-col gap-1 text-[11px] leading-5 text-slate-500 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                              <span>{evidence.statement}</span>
+                              {evidence.sourceUrl ? (
+                                <a href={evidence.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 font-semibold text-cyan-300 hover:text-cyan-100">
+                                  {evidence.sourceLabel} / {evidence.sourceDate ?? L("date unavailable", "fecha no disponible")}
+                                  <ExternalLink className="h-3 w-3" />
+                                </a>
+                              ) : (
+                                <span className="shrink-0 text-slate-600">
+                                  {evidence.sourceLabel} / {evidence.sourceDate ?? L("date unavailable", "fecha no disponible")}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-5 border-y border-slate-800 py-5 text-sm text-slate-500">
+                    {L(
+                      "No evidence-backed reason to reconsider the position was established.",
+                      "No se estableció un motivo respaldado por evidencia para reconsiderar la posición."
+                    )}
+                  </p>
+                )}
+
+                {positionExitReview.missingEvidence.length ? (
+                  <div className="mt-5 border-l-2 border-amber-300 pl-4">
+                    <p className="text-xs font-semibold uppercase text-amber-200">{L("Evidence still needed", "Evidencia pendiente")}</p>
+                    <ul className="mt-2 space-y-1 text-xs leading-5 text-amber-100/75">
+                      {positionExitReview.missingEvidence.map((item, index) => <li key={`exit-missing-${index}`}>• {item}</li>)}
+                    </ul>
+                  </div>
+                ) : null}
+
+                <p className="mt-5 border-t border-slate-800 pt-4 text-xs font-semibold text-slate-500">
+                  {L(
+                    "This review cannot approve or execute an exit. Human decision required.",
+                    "Esta revisión no puede aprobar ni ejecutar una salida. Requiere decisión humana."
+                  )}
+                </p>
+              </div>
+            ) : (
+              <div className="mt-5 flex flex-col gap-3 border-y border-slate-800 py-5 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm leading-6 text-slate-400">
+                  {L(
+                    "Run Neuro with current filings, valuation, and portfolio context to determine what changed.",
+                    "Corre Neuro con filings, valoración y contexto de cartera actuales para determinar qué cambió."
+                  )}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void autoBuildEvidenceAndRun()}
+                  disabled={autoRunLoading || agentLoading}
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-400/50 bg-cyan-400/10 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-400/20 disabled:opacity-50"
+                >
+                  {autoRunLoading || agentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                  {L("Run exit review", "Correr revisión de salida")}
+                </button>
+              </div>
+            )}
+          </section>
+        ) : null}
 
         <section className={activeWorkspaceTab === "research" ? "rounded-xl border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/20 sm:p-5" : "hidden"}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -2314,8 +4689,9 @@ export default function NeuroAnalysisPage() {
                     <td className="px-3 py-2">
                       <input
                         type="number"
-                        value={position.averageCost}
-                        onChange={(event) => updatePortfolioHolding(position.id, { averageCost: toNumber(event.target.value) })}
+                        value={position.averageCost ?? ""}
+                        onChange={(event) => updatePortfolioHolding(position.id, { averageCost: optionalNumber(event.target.value) })}
+                        placeholder={DATA_NOT_AVAILABLE}
                         className="h-9 w-28 rounded-lg border border-slate-800 bg-slate-950/70 px-2 text-slate-100 outline-none focus:border-sky-400"
                       />
                     </td>
@@ -2329,7 +4705,7 @@ export default function NeuroAnalysisPage() {
                     </td>
                     <td className="px-3 py-2 font-semibold text-slate-100">{formatCurrency(position.currentPrice, localeTag)}</td>
                     <td className="px-3 py-2 text-slate-300">{formatCompactCurrency(position.value, localeTag)}</td>
-                    <td className={`px-3 py-2 font-semibold ${position.pnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                    <td className={`px-3 py-2 font-semibold ${position.pnl == null ? "text-slate-400" : position.pnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
                       {formatCompactCurrency(position.pnl, localeTag)}
                       <span className="ml-1 text-xs text-slate-500">{formatPercent(position.pnlPct, localeTag)}</span>
                     </td>
@@ -2340,6 +4716,10 @@ export default function NeuroAnalysisPage() {
                         <button
                           type="button"
                           onClick={() => {
+                            if (originalInvestmentThesis && position.ticker !== originalInvestmentThesis.ticker) {
+                              startNewResearchCase(position.ticker);
+                              return;
+                            }
                             setFocusTicker(position.ticker);
                             setFocusTickerDraft(position.ticker);
                             setResearchGoal(defaultResearchGoal(isEs));
@@ -2399,7 +4779,10 @@ export default function NeuroAnalysisPage() {
               <div className="mt-4 space-y-3">
                 {portfolioXray.sectorRows.length ? (
                   portfolioXray.sectorRows.slice(0, 7).map((row) => {
-                    const weight = portfolioSummary.totalValue > 0 ? row.value / portfolioSummary.totalValue : 0;
+                    const weight =
+                      portfolioSummary.totalValue != null && portfolioSummary.totalValue > 0
+                        ? row.value / portfolioSummary.totalValue
+                        : null;
                     return (
                       <div key={row.name}>
                         <div className="flex items-center justify-between gap-3 text-xs">
@@ -2407,7 +4790,7 @@ export default function NeuroAnalysisPage() {
                           <span className="font-semibold text-slate-100">{formatPercent(weight, localeTag)}</span>
                         </div>
                         <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-800">
-                          <div className="h-full rounded-full bg-sky-400" style={{ width: `${Math.min(100, weight * 100)}%` }} />
+                          <div className="h-full rounded-full bg-sky-400" style={{ width: `${weight == null ? 0 : Math.min(100, weight * 100)}%` }} />
                         </div>
                       </div>
                     );
@@ -2423,7 +4806,10 @@ export default function NeuroAnalysisPage() {
               <div className="mt-4 space-y-3">
                 {portfolioXray.instrumentRows.length ? (
                   portfolioXray.instrumentRows.map((row) => {
-                    const weight = portfolioSummary.totalValue > 0 ? row.value / portfolioSummary.totalValue : 0;
+                    const weight =
+                      portfolioSummary.totalValue != null && portfolioSummary.totalValue > 0
+                        ? row.value / portfolioSummary.totalValue
+                        : null;
                     return (
                       <div key={row.name} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
                         <div className="flex items-center justify-between gap-3">
@@ -2467,6 +4853,48 @@ export default function NeuroAnalysisPage() {
           </div>
         </section>
 
+        {activeWorkspaceTab === "research" ? (
+          <PortfolioExposureMapPanel
+            map={portfolioExposureMap}
+            isEs={isEs}
+            loading={autoRunLoading || agentLoading}
+            onRun={() => void autoBuildEvidenceAndRun()}
+          />
+        ) : null}
+
+        {activeWorkspaceTab === "research" ? (
+          <MacroContextPanel
+            report={macroContext}
+            isEs={isEs}
+            loading={autoRunLoading || agentLoading}
+            onRun={() => void autoBuildEvidenceAndRun()}
+          />
+        ) : null}
+
+        {activeWorkspaceTab === "research" ? (
+          <PerformanceAttributionPanel
+            report={performanceAttribution}
+            isEs={isEs}
+            loading={performanceAttributionLoading}
+            error={performanceAttributionError}
+            onRun={() => void runPerformanceAttribution()}
+          />
+        ) : null}
+
+        {activeWorkspaceTab === "research" ? (
+          <CapitalAllocationDashboardPanel
+            dashboard={capitalAllocationDashboard}
+            availableCapital={availableCapital}
+            isEs={isEs}
+            loading={autoRunLoading || agentLoading}
+            onAvailableCapitalChange={(value) => {
+              setAvailableCapital(value);
+              setCapitalAllocationDashboard(null);
+            }}
+            onRun={() => void autoBuildEvidenceAndRun()}
+          />
+        ) : null}
+
         <section
           className={
             activeWorkspaceTab !== "research"
@@ -2474,8 +4902,10 @@ export default function NeuroAnalysisPage() {
               : "grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]"
           }
         >
-          <div className="space-y-5">
+            <div className="space-y-5">
             <div className={`${activeWorkspaceTab === "fund_plan" ? "" : "hidden"} space-y-5`}>
+              <CapitalAccountsPanel isEs={isEs} />
+
               <section className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                   <div className="max-w-4xl">
@@ -2805,12 +5235,12 @@ export default function NeuroAnalysisPage() {
                 <div className="max-w-4xl">
                   <div className="flex items-center gap-2">
                     <BarChart3 className="h-4 w-4 text-sky-300" />
-                    <h2 className="text-base font-semibold">{L("Sector Value Screener", "Screener de valor por sector")}</h2>
+                    <h2 className="text-base font-semibold">{L("Deterministic Sector Screener", "Screener determinístico por sector")}</h2>
                   </div>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
                     {L(
-                      "Pull market and fundamental data for a sector universe, calculate sector valuation medians, and rank companies by value, quality, dividends, momentum, and relative potential.",
-                      "Trae data de mercado y fundamentales para un universo sectorial, calcula medianas de valuation del sector y rankea compañías por valor, calidad, dividendos, momentum y potencial relativo."
+                      "Apply explicit financial criteria to a sector universe. Every rule reports PASS, FAIL, or DATA NOT AVAILABLE without an investment score.",
+                      "Aplica criterios financieros explícitos a un universo sectorial. Cada regla muestra PASS, FAIL o DATA NOT AVAILABLE sin crear un score de inversión."
                     )}
                   </p>
                 </div>
@@ -2820,7 +5250,7 @@ export default function NeuroAnalysisPage() {
                 </div>
               </div>
 
-              <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-[220px_1fr_auto]">
+              <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-[210px_260px_1fr_auto]">
                 <label className="block">
                   <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Sector", "Sector")}</span>
                   <select
@@ -2844,6 +5274,24 @@ export default function NeuroAnalysisPage() {
                       <option key={sector.key} value={sector.key}>
                         {sector.label}
                       </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Research strategy", "Estrategia de research")}</span>
+                  <select
+                    value={screenerStrategy}
+                    onChange={(event) => setScreenerStrategy(event.target.value)}
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none"
+                  >
+                    {(screenerResult?.templates ?? [
+                      { key: "quality_compounder", name: "Quality Compounder" },
+                      { key: "value_candidate", name: "Value Candidate" },
+                      { key: "quality_at_reasonable_price", name: "Quality at a Reasonable Price" },
+                      { key: "price_dislocation", name: "Price Dislocation" },
+                      { key: "balance_sheet_strength", name: "Balance Sheet Strength" },
+                    ]).map((template) => (
+                      <option key={template.key} value={template.key}>{template.name}</option>
                     ))}
                   </select>
                 </label>
@@ -2877,23 +5325,21 @@ export default function NeuroAnalysisPage() {
                     <Readout label={L("Sector", "Sector")} value={screenerResult.sectorLabel} />
                     <Readout label={L("Median FCF yield", "FCF yield mediana")} value={formatPercent(screenerResult.summary?.medianFcfYield, localeTag)} />
                     <Readout label={L("Median forward P/E", "Forward P/E mediana")} value={formatCompactNumber(screenerResult.summary?.medianForwardPE, localeTag)} />
-                    <Readout label={L("High potential", "Alto potencial")} value={screenerResult.summary?.highPotentialCount ?? 0} />
+                    <Readout label={L("Passed all criteria", "Cumplen todos los criterios")} value={screenerResult.summary?.passedAllRequiredCriteria ?? 0} />
                   </div>
 
                   <div className="mt-5 overflow-x-auto rounded-lg border border-slate-800">
-                    <table className="w-full min-w-[1180px] text-left text-sm">
+                    <table className="w-full min-w-[1120px] text-left text-sm">
                       <thead className="bg-slate-950/55 text-xs text-slate-500">
                         <tr>
                           <th className="px-3 py-2">{L("Company", "Compañía")}</th>
-                          <th className="px-3 py-2">{L("Potential", "Potencial")}</th>
-                          <th className="px-3 py-2">{L("Value", "Valor")}</th>
-                          <th className="px-3 py-2">{L("Quality", "Calidad")}</th>
-                          <th className="px-3 py-2">{L("Dividend", "Dividendo")}</th>
+                          <th className="px-3 py-2">{L("Screen result", "Resultado")}</th>
+                          <th className="px-3 py-2">{L("Data coverage", "Cobertura de data")}</th>
+                          <th className="px-3 py-2">{L("Criteria", "Criterios")}</th>
                           <th className="px-3 py-2">{L("FCF yield", "FCF yield")}</th>
                           <th className="px-3 py-2">{L("Forward P/E", "Forward P/E")}</th>
                           <th className="px-3 py-2">{L("Revenue CAGR", "Revenue CAGR")}</th>
                           <th className="px-3 py-2">{L("FCF margin", "Margen FCF")}</th>
-                          <th className="px-3 py-2">{L("Verdict", "Veredicto")}</th>
                           <th className="px-3 py-2"></th>
                         </tr>
                       </thead>
@@ -2904,15 +5350,31 @@ export default function NeuroAnalysisPage() {
                               <p className="font-semibold text-slate-100">{row.ticker}</p>
                               <p className="max-w-[240px] truncate text-xs text-slate-500">{row.name}</p>
                             </td>
-                            <td className="px-3 py-2 font-semibold text-emerald-300">{row.potentialScore}</td>
-                            <td className="px-3 py-2 text-slate-300">{row.valueScore}</td>
-                            <td className="px-3 py-2 text-slate-300">{row.qualityScore}</td>
-                            <td className="px-3 py-2 text-slate-300">{row.dividendScore}</td>
+                            <td className={`px-3 py-2 text-xs font-semibold ${row.status === "PASSED_ALL_REQUIRED_CRITERIA" ? "text-emerald-300" : row.status === "INSUFFICIENT_DATA" ? "text-amber-300" : "text-rose-300"}`}>
+                              {row.status === "PASSED_ALL_REQUIRED_CRITERIA"
+                                ? L("PASSED", "CUMPLE")
+                                : row.status === "INSUFFICIENT_DATA"
+                                  ? L("NEEDS DATA", "FALTA DATA")
+                                  : L("CRITERIA FAILED", "NO CUMPLE")}
+                            </td>
+                            <td className="px-3 py-2 text-slate-300">{formatPercent(row.dataCompletenessPct / 100, localeTag)}</td>
+                            <td className="px-3 py-2">
+                              <div className="flex max-w-[300px] flex-wrap gap-1">
+                                {row.criteria.map((criterion) => (
+                                  <span
+                                    key={criterion.key}
+                                    title={criterion.explanation}
+                                    className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${criterion.status === "PASS" ? "border-emerald-500/30 text-emerald-300" : criterion.status === "FAIL" ? "border-rose-500/30 text-rose-300" : "border-amber-500/30 text-amber-300"}`}
+                                  >
+                                    {criterion.label}: {criterion.status === "DATA_NOT_AVAILABLE" ? "N/A" : criterion.status}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
                             <td className="px-3 py-2 text-slate-300">{formatPercent(row.fcfYield, localeTag)}</td>
                             <td className="px-3 py-2 text-slate-300">{formatCompactNumber(row.forwardPE ?? row.trailingPE, localeTag)}</td>
                             <td className="px-3 py-2 text-slate-300">{formatPercent(row.revenueCagr, localeTag)}</td>
                             <td className="px-3 py-2 text-slate-300">{formatPercent(row.fcfMargin, localeTag)}</td>
-                            <td className="px-3 py-2 text-slate-300">{row.verdict.replace(/_/g, " ")}</td>
                             <td className="px-3 py-2">
                               <button
                                 type="button"
@@ -2930,8 +5392,8 @@ export default function NeuroAnalysisPage() {
 
                   <p className="mt-3 text-xs leading-5 text-slate-500">
                     {L(
-                      "This screener is a first-pass ranking. A high score means the company deserves deeper research, not that it should be bought. Confirm with filings, thesis context, valuation, and risk review.",
-                      "Este screener es un ranking inicial. Un score alto significa que la compañía merece research más profundo, no que se debe comprar. Confirma con filings, contexto de tesis, valuation y revisión de riesgo."
+                      "Screen results are research triage, not investment decisions. Missing evidence remains visible and no result authorizes a purchase.",
+                      "Los resultados organizan el research; no son decisiones de inversión. La evidencia faltante permanece visible y ningún resultado autoriza una compra."
                     )}
                   </p>
                 </>
@@ -2987,7 +5449,7 @@ export default function NeuroAnalysisPage() {
                 />
                 <Readout
                   label={focusInstrumentIsFundLike ? L("Fund profile", "Profile del fondo") : L("Latest fiscal year", "Último año fiscal")}
-                  value={focusInstrumentIsFundLike ? marketData?.fund?.categoryName || marketData?.company?.quoteType || "ETF" : latestFundamentals?.year ?? "-"}
+                  value={focusInstrumentIsFundLike ? marketData?.fund?.categoryName || marketData?.company?.quoteType || "ETF" : latestFundamentals?.year ?? DATA_NOT_AVAILABLE}
                   hint={
                     focusInstrumentIsFundLike
                       ? `${L("Yield", "Yield")} ${formatPercent(marketData?.fund?.yield ?? marketData?.market?.dividendYield, localeTag)} / ${L("Fee", "Costo")} ${formatPercent(marketData?.fund?.annualReportExpenseRatio, localeTag)}`
@@ -3017,31 +5479,603 @@ export default function NeuroAnalysisPage() {
               ) : null}
             </div>
 
+            <div className={activeWorkspaceTab === "research" ? "" : "hidden"}>
+              <FinancialIntegrityPanel
+                manifest={reportFinancialDataIntegrity ?? marketData?.financialDataIntegrity}
+                isEs={isEs}
+              />
+            </div>
+
+            <section className={`${activeWorkspaceTab === "research" ? "" : "hidden"} border-y border-cyan-400/25 bg-cyan-400/[0.035] px-1 py-5`}>
+              <div className="flex flex-col gap-3 px-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-4xl">
+                  <div className="flex items-center gap-2">
+                    <BriefcaseBusiness className="h-4 w-4 text-cyan-300" />
+                    <h2 className="text-base font-semibold">{L("Business Quality Analysis", "Análisis de Calidad del Negocio")}</h2>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    {L(
+                      "Stage 1 of 2. Neuro evaluates the operating business without seeing price or valuation. Only after this dossier is complete does the stock analysis begin.",
+                      "Etapa 1 de 2. Neuro evalúa el negocio operativo sin ver precio ni valoración. El análisis de la acción comienza solamente después de completar este expediente."
+                    )}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase">
+                  <span className="rounded-md border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1.5 text-cyan-200">
+                    {L("Business first", "Negocio primero")}
+                  </span>
+                  <span className="rounded-md border border-slate-700 bg-slate-950/60 px-2.5 py-1.5 text-slate-400">
+                    {businessQualityAnalysis?.status?.replace(/_/g, " ") ?? L("Pending", "Pendiente")}
+                  </span>
+                  <span className="rounded-md border border-slate-700 bg-slate-950/60 px-2.5 py-1.5 text-slate-400">
+                    {L("No score", "Sin score")}
+                  </span>
+                </div>
+              </div>
+
+              {focusInstrumentIsFundLike || businessQualityAnalysis?.status === "not_applicable" ? (
+                <div className="mx-4 mt-5 border-l-2 border-sky-400 pl-4 text-sm leading-6 text-slate-300">
+                  {L(
+                    "This operating-company engine does not apply to an ETF or fund. Neuro uses the fund framework for strategy, holdings, concentration, fees, liquidity, distributions, and tracking risk instead.",
+                    "Este motor de compañías operativas no aplica a un ETF o fondo. Neuro usa el marco de fondos para estrategia, holdings, concentración, costos, liquidez, distribuciones y tracking risk."
+                  )}
+                </div>
+              ) : businessQualityAnalysis ? (
+                <>
+                  <div className="mt-5 border-t border-slate-800">
+                    {BUSINESS_QUALITY_DIMENSIONS.map((definition, index) => {
+                      const dimension = businessQualityAnalysis.dimensions.find((item) => item.key === definition.key);
+                      if (!dimension) return null;
+                      return (
+                        <details key={definition.key} className="group border-b border-slate-800 px-4 py-1" open={index === 0}>
+                          <summary className="grid cursor-pointer list-none grid-cols-[34px_minmax(0,1fr)_auto] items-start gap-3 py-3 marker:content-none">
+                            <span className="font-mono text-xs font-semibold text-cyan-400">{String(index + 1).padStart(2, "0")}</span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-slate-100">{businessQualityLabels[definition.key]}</p>
+                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 group-open:line-clamp-none">{dimension.conclusion}</p>
+                            </div>
+                            <ChevronRight className="mt-0.5 h-4 w-4 text-slate-600 transition-transform group-open:rotate-90" />
+                          </summary>
+                          <div className="grid grid-cols-1 gap-x-5 gap-y-4 pb-5 pl-[46px] lg:grid-cols-2 2xl:grid-cols-4">
+                            <div>
+                              <p className="mb-2 text-[10px] font-semibold uppercase text-emerald-300">{L("Supporting evidence", "Evidencia a favor")}</p>
+                              <BusinessEvidenceList rows={dimension.supportingEvidence} />
+                            </div>
+                            <div>
+                              <p className="mb-2 text-[10px] font-semibold uppercase text-rose-300">{L("Contradictory evidence", "Evidencia contradictoria")}</p>
+                              <BusinessEvidenceList rows={dimension.contradictoryEvidence} />
+                            </div>
+                            <div>
+                              <p className="mb-2 text-[10px] font-semibold uppercase text-amber-300">{L("Uncertainty", "Incertidumbre")}</p>
+                              <ul className="space-y-2 text-xs leading-5 text-slate-400">
+                                {dimension.uncertainty.map((item, itemIndex) => <li key={`${item}-${itemIndex}`} className="border-l border-slate-700 pl-3">{item}</li>)}
+                              </ul>
+                            </div>
+                            <div>
+                              <p className="mb-2 text-[10px] font-semibold uppercase text-sky-300">{L("What would change it", "Qué cambiaría la conclusión")}</p>
+                              <ul className="space-y-2 text-xs leading-5 text-slate-400">
+                                {dimension.additionalInformation.map((item, itemIndex) => <li key={`${item}-${itemIndex}`} className="border-l border-slate-700 pl-3">{item}</li>)}
+                              </ul>
+                            </div>
+                          </div>
+                        </details>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mx-4 mt-6 border-l-2 border-amber-300 bg-amber-300/[0.04] px-4 py-4">
+                    <p className="text-xs font-semibold uppercase text-amber-200">
+                      WHAT MUST BE TRUE FOR THIS BUSINESS TO BE AN ATTRACTIVE INVESTMENT?
+                    </p>
+                    <div className="mt-4 divide-y divide-slate-800">
+                      {businessQualityAnalysis.whatMustBeTrue.map((condition, index) => (
+                        <div key={`${condition.condition}-${index}`} className="grid grid-cols-1 gap-3 py-4 first:pt-0 last:pb-0 lg:grid-cols-[minmax(0,1.2fr)_repeat(3,minmax(0,1fr))]">
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase text-amber-300">{L("Condition", "Condición")}</p>
+                            <p className="mt-1 text-sm font-semibold leading-6 text-slate-100">{condition.condition}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase text-slate-500">{L("Why it matters", "Por qué importa")}</p>
+                            <p className="mt-1 text-xs leading-5 text-slate-400">{condition.whyItMatters}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase text-slate-500">{L("Evidence needed", "Evidencia necesaria")}</p>
+                            <p className="mt-1 text-xs leading-5 text-slate-400">{condition.evidenceNeeded}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase text-rose-300">{L("Failure signal", "Señal de fallo")}</p>
+                            <p className="mt-1 text-xs leading-5 text-slate-400">{condition.failureSignal}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="mx-4 mt-5 border-l-2 border-slate-700 pl-4 text-sm leading-6 text-slate-500">
+                  {L(
+                    "Run Neuro Analysis to build the 20-dimension business dossier before valuation.",
+                    "Corre Neuro Analysis para construir el expediente de 20 dimensiones antes de la valoración."
+                  )}
+                </div>
+              )}
+            </section>
+
+            <section className={`${activeWorkspaceTab === "research" ? "" : "hidden"} border-y border-violet-400/25 bg-violet-400/[0.035] px-1 py-5`}>
+              <div className="flex flex-col gap-3 px-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-4xl">
+                  <div className="flex items-center gap-2">
+                    <History className="h-4 w-4 text-violet-300" />
+                    <h2 className="text-base font-semibold">{L("Management & Capital Allocation", "Gerencia y Asignación de Capital")}</h2>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    {L(
+                      "Documented decisions and subsequent financial outcomes. This module does not judge personality, honesty, intelligence, competence, motives, or character.",
+                      "Decisiones documentadas y resultados financieros posteriores. Este módulo no juzga personalidad, honestidad, inteligencia, competencia, motivos ni carácter."
+                    )}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase">
+                  <span className="rounded-md border border-violet-400/30 bg-violet-400/10 px-2.5 py-1.5 text-violet-200">
+                    {L("Actions, not personality", "Acciones, no personalidad")}
+                  </span>
+                  <span className="rounded-md border border-slate-700 bg-slate-950/60 px-2.5 py-1.5 text-slate-400">
+                    {managementCapitalAllocationAnalysis?.status?.replace(/_/g, " ") ?? L("Pending", "Pendiente")}
+                  </span>
+                  <span className="rounded-md border border-slate-700 bg-slate-950/60 px-2.5 py-1.5 text-slate-400">
+                    {L("No score", "Sin score")}
+                  </span>
+                </div>
+              </div>
+
+              {focusInstrumentIsFundLike || managementCapitalAllocationAnalysis?.status === "not_applicable" ? (
+                <div className="mx-4 mt-5 border-l-2 border-sky-400 pl-4 text-sm leading-6 text-slate-300">
+                  {L(
+                    "This operating-company management module does not apply to an ETF or fund.",
+                    "Este módulo de gerencia de compañías operativas no aplica a un ETF o fondo."
+                  )}
+                </div>
+              ) : managementCapitalAllocationAnalysis ? (
+                <>
+                  <div className="mx-4 mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+                    <div className="border-l-2 border-violet-300 pl-4">
+                      <p className="text-[10px] font-semibold uppercase text-violet-300">{L("Observable allocation pattern", "Patrón observable de asignación")}</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-200">{managementCapitalAllocationAnalysis.observableAllocationPattern}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Readout
+                        label={L("Allocation calculation", "Cálculo de asignación")}
+                        value={managementCapitalAllocationAnalysis.incrementalCapitalAllocation.status.replace(/_/g, " ")}
+                      />
+                      <Readout
+                        label={L("Comparable uses", "Usos comparables")}
+                        value={formatDocumentedAmount(
+                          managementCapitalAllocationAnalysis.incrementalCapitalAllocation.totalComparableUses,
+                          managementCapitalAllocationAnalysis.incrementalCapitalAllocation.currency,
+                          localeTag
+                        )}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mx-4 mt-6 border-t border-slate-800 pt-5">
+                    <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase text-slate-300">{L("Incremental capital allocation", "Asignación de capital incremental")}</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          {managementCapitalAllocationAnalysis.incrementalCapitalAllocation.periodStart && managementCapitalAllocationAnalysis.incrementalCapitalAllocation.periodEnd
+                            ? `${managementCapitalAllocationAnalysis.incrementalCapitalAllocation.periodStart} / ${managementCapitalAllocationAnalysis.incrementalCapitalAllocation.periodEnd}`
+                            : L("A comparable period could not be established.", "No se pudo establecer un periodo comparable.")}
+                        </p>
+                      </div>
+                      <span className="text-[11px] font-semibold uppercase text-slate-500">
+                        {managementCapitalAllocationAnalysis.incrementalCapitalAllocation.currency ?? L("Currency unresolved", "Moneda sin resolver")}
+                      </span>
+                    </div>
+
+                    {managementCapitalAllocationAnalysis.incrementalCapitalAllocation.sourcesOfCapital.length ? (
+                      <div className="mt-4">
+                        <p className="text-[10px] font-semibold uppercase text-slate-500">
+                          {L("Documented sources of capital", "Fuentes de capital documentadas")}
+                        </p>
+                        <div className="mt-2 divide-y divide-slate-800 border-y border-slate-800">
+                          {managementCapitalAllocationAnalysis.incrementalCapitalAllocation.sourcesOfCapital.map((row, index) => (
+                            <div
+                              key={`${row.label}-${index}`}
+                              className="grid grid-cols-1 gap-2 py-3 text-xs sm:grid-cols-[minmax(0,1fr)_150px_130px] sm:items-center"
+                            >
+                              <div>
+                                <p className="font-semibold text-slate-200">{row.label}</p>
+                                <p className="mt-1 text-[10px] uppercase text-slate-600">
+                                  {row.source.sourceLabel}
+                                  {row.source.sourceDate ? ` / ${row.source.sourceDate}` : ""}
+                                </p>
+                              </div>
+                              <p className="text-slate-300">{formatDocumentedAmount(row.amount, row.currency, localeTag)}</p>
+                              <p className={row.source.status === "identified" ? "font-semibold text-emerald-300" : "font-semibold text-amber-300"}>
+                                {row.source.status.replace(/_/g, " ")}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {managementCapitalAllocationAnalysis.incrementalCapitalAllocation.uses.length ? (
+                      <div className="mt-4 overflow-x-auto border-y border-slate-800">
+                        <table className="w-full min-w-[780px] text-left text-xs">
+                          <thead className="bg-slate-950/40 text-[10px] uppercase text-slate-500">
+                            <tr>
+                              <th className="px-3 py-2">{L("Use", "Uso")}</th>
+                              <th className="px-3 py-2">{L("Amount", "Cantidad")}</th>
+                              <th className="px-3 py-2">{L("Comparable mix", "Mezcla comparable")}</th>
+                              <th className="px-3 py-2">{L("Basis", "Base")}</th>
+                              <th className="px-3 py-2">{L("Evidence status", "Estado evidencia")}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {managementCapitalAllocationAnalysis.incrementalCapitalAllocation.uses.map((row, index) => (
+                              <tr key={`${row.label}-${index}`} className="border-t border-slate-800">
+                                <td className="px-3 py-3">
+                                  <p className="font-semibold text-slate-100">{row.label}</p>
+                                  {!row.includedInComparableTotal && row.exclusionReason ? (
+                                    <p className="mt-1 max-w-[320px] text-[11px] leading-4 text-slate-500">{row.exclusionReason}</p>
+                                  ) : null}
+                                </td>
+                                <td className="px-3 py-3 text-slate-300">{formatDocumentedAmount(row.amount, row.currency, localeTag)}</td>
+                                <td className="px-3 py-3 text-slate-300">{formatPercent(row.percentOfComparableUses, localeTag)}</td>
+                                <td className="px-3 py-3 text-slate-400">{row.basis.replace(/_/g, " ")}</td>
+                                <td className={row.source.status === "identified" ? "px-3 py-3 text-emerald-300" : "px-3 py-3 text-amber-300"}>
+                                  {row.source.status.replace(/_/g, " ")}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="mt-4 border-l border-amber-300 pl-3 text-xs leading-5 text-amber-100/80">
+                        {L("No comparable capital uses could be calculated from verified documents.", "No se pudieron calcular usos de capital comparables desde documentos verificados.")}
+                      </p>
+                    )}
+                    <p className="mt-3 text-xs leading-5 text-slate-500">{managementCapitalAllocationAnalysis.incrementalCapitalAllocation.methodology}</p>
+                    <ul className="mt-2 space-y-1 text-[11px] leading-5 text-slate-600">
+                      {managementCapitalAllocationAnalysis.incrementalCapitalAllocation.limitations.map((item, index) => <li key={`${item}-${index}`}>- {item}</li>)}
+                    </ul>
+                  </div>
+
+                  <div className="mx-4 mt-6 border-t border-slate-800 pt-5">
+                    <p className="text-xs font-semibold uppercase text-slate-300">{L("Guidance versus documented outcomes", "Guidance versus resultados documentados")}</p>
+                    {managementCapitalAllocationAnalysis.guidanceOutcomeComparisons.length ? (
+                      <div className="mt-4 overflow-x-auto border-y border-slate-800">
+                        <table className="w-full min-w-[980px] text-left text-xs">
+                          <thead className="bg-slate-950/40 text-[10px] uppercase text-slate-500">
+                            <tr>
+                              <th className="px-3 py-2">{L("Metric", "Métrica")}</th>
+                              <th className="px-3 py-2">{L("Documented statement", "Declaración documentada")}</th>
+                              <th className="px-3 py-2">{L("Subsequent outcome", "Resultado posterior")}</th>
+                              <th className="px-3 py-2">{L("Result", "Resultado")}</th>
+                              <th className="px-3 py-2">{L("Variance", "Variación")}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {managementCapitalAllocationAnalysis.guidanceOutcomeComparisons.map((comparison, index) => (
+                              <tr key={`${comparison.metric}-${index}`} className="border-t border-slate-800 align-top">
+                                <td className="px-3 py-3 font-semibold text-slate-100">{comparison.metric}</td>
+                                <td className="max-w-[280px] px-3 py-3 leading-5 text-slate-400">{comparison.managementStatement}</td>
+                                <td className="max-w-[280px] px-3 py-3 leading-5 text-slate-400">{comparison.subsequentDocumentedOutcome}</td>
+                                <td className="px-3 py-3 font-semibold text-violet-200">{comparison.result.replace(/_/g, " ")}</td>
+                                <td className="max-w-[220px] px-3 py-3 leading-5 text-slate-500">{comparison.variance}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="mt-3 border-l border-slate-700 pl-3 text-xs leading-5 text-slate-500">
+                        {L("No guidance statement could be matched reliably to a subsequent outcome.", "No se pudo vincular confiablemente una declaración de guidance con un resultado posterior.")}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="mt-6 border-t border-slate-800">
+                    {MANAGEMENT_ACTION_CATEGORIES.map((definition, index) => {
+                      const category = managementCapitalAllocationAnalysis.categories.find((item) => item.key === definition.key);
+                      if (!category) return null;
+                      return (
+                        <details key={definition.key} className="group border-b border-slate-800 px-4 py-1" open={index === 0}>
+                          <summary className="grid cursor-pointer list-none grid-cols-[34px_minmax(0,1fr)_auto] items-start gap-3 py-3 marker:content-none">
+                            <span className="font-mono text-xs font-semibold text-violet-400">{String(index + 1).padStart(2, "0")}</span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-slate-100">{managementCategoryLabels[definition.key]}</p>
+                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 group-open:line-clamp-none">{category.conclusion}</p>
+                            </div>
+                            <ChevronRight className="mt-0.5 h-4 w-4 text-slate-600 transition-transform group-open:rotate-90" />
+                          </summary>
+                          <div className="space-y-5 pb-5 pl-[46px]">
+                            <div>
+                              <p className="mb-2 text-[10px] font-semibold uppercase text-emerald-300">{L("Documented actions and consequences", "Acciones documentadas y consecuencias")}</p>
+                              {category.documentedActions.length ? (
+                                <div className="divide-y divide-slate-800 border-y border-slate-800">
+                                  {category.documentedActions.map((action, actionIndex) => (
+                                    <div key={`${action.decision}-${actionIndex}`} className="grid grid-cols-1 gap-3 py-3 lg:grid-cols-[110px_minmax(0,1fr)_140px_minmax(0,1fr)]">
+                                      <p className="text-xs text-slate-500">{action.actionDate ?? L("Date unavailable", "Fecha no disponible")}</p>
+                                      <p className="text-xs font-semibold leading-5 text-slate-200">{action.decision}</p>
+                                      <p className="text-xs text-slate-300">{formatDocumentedAmount(action.amount, action.currency, localeTag)}</p>
+                                      <div>
+                                        <p className="text-xs leading-5 text-slate-400">{action.financialConsequence}</p>
+                                        <p className="mt-1 text-[10px] uppercase text-slate-600">{action.source.sourceLabel} {action.source.sourceDate ? `/ ${action.source.sourceDate}` : ""}</p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="border-l border-slate-700 pl-3 text-xs leading-5 text-slate-500">{L("No verified action identified.", "No se identificó una acción verificada.")}</p>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                              <div>
+                                <p className="mb-2 text-[10px] font-semibold uppercase text-rose-300">{L("Documented inconsistencies", "Inconsistencias documentadas")}</p>
+                                <BusinessEvidenceList rows={category.inconsistencies} />
+                              </div>
+                              <div>
+                                <p className="mb-2 text-[10px] font-semibold uppercase text-amber-300">{L("Unresolved questions", "Preguntas sin resolver")}</p>
+                                <ul className="space-y-2 text-xs leading-5 text-slate-400">
+                                  {category.unresolvedQuestions.map((question, questionIndex) => <li key={`${question}-${questionIndex}`} className="border-l border-slate-700 pl-3">{question}</li>)}
+                                </ul>
+                              </div>
+                            </div>
+                          </div>
+                        </details>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mx-4 mt-6 grid grid-cols-1 gap-5 border-t border-slate-800 pt-5 lg:grid-cols-3">
+                    {[
+                      { label: L("Financial consequences", "Consecuencias financieras"), rows: managementCapitalAllocationAnalysis.financialConsequences, tone: "text-emerald-300" },
+                      { label: L("Inconsistencies", "Inconsistencias"), rows: managementCapitalAllocationAnalysis.inconsistencies, tone: "text-rose-300" },
+                      { label: L("Unresolved questions", "Preguntas sin resolver"), rows: managementCapitalAllocationAnalysis.unresolvedQuestions, tone: "text-amber-300" },
+                    ].map((column) => (
+                      <div key={column.label}>
+                        <p className={`text-[10px] font-semibold uppercase ${column.tone}`}>{column.label}</p>
+                        <ul className="mt-3 space-y-2 text-xs leading-5 text-slate-400">
+                          {column.rows.map((item, index) => <li key={`${item}-${index}`} className="border-l border-slate-700 pl-3">{item}</li>)}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="mx-4 mt-5 border-l-2 border-slate-700 pl-4 text-sm leading-6 text-slate-500">
+                  {L(
+                    "Run Neuro Analysis to build the documented management and capital-allocation record.",
+                    "Corre Neuro Analysis para construir el expediente documentado de gerencia y asignación de capital."
+                  )}
+                </div>
+              )}
+            </section>
+
+            <section className={`${activeWorkspaceTab === "research" ? "" : "hidden"} border-y border-amber-300/25 bg-amber-300/[0.025] px-1 py-5`}>
+              <div className="flex flex-col gap-3 px-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-4xl">
+                  <div className="flex items-center gap-2">
+                    <FileWarning className="h-4 w-4 text-amber-300" />
+                    <h2 className="text-base font-semibold">{L("Earnings Quality & Accounting Risk", "Calidad de Ganancias y Riesgo Contable")}</h2>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    {L(
+                      "Multi-year financial relationships that deserve additional investigation. Statistical anomalies are not fraud findings.",
+                      "Relaciones financieras multianuales que merecen investigación adicional. Las anomalías estadísticas no son determinaciones de fraude."
+                    )}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase">
+                  <span className="rounded-md border border-amber-300/30 bg-amber-300/10 px-2.5 py-1.5 text-amber-100">
+                    {L("Investigation screen", "Filtro de investigación")}
+                  </span>
+                  <span className="rounded-md border border-slate-700 bg-slate-950/60 px-2.5 py-1.5 text-slate-400">
+                    {earningsQualityAccountingRiskAnalysis?.status?.replace(/_/g, " ") ?? L("Pending", "Pendiente")}
+                  </span>
+                  <span className="rounded-md border border-slate-700 bg-slate-950/60 px-2.5 py-1.5 text-slate-400">
+                    {L("No fraud score", "Sin score de fraude")}
+                  </span>
+                </div>
+              </div>
+
+              {focusInstrumentIsFundLike || earningsQualityAccountingRiskAnalysis?.status === "not_applicable" ? (
+                <div className="mx-4 mt-5 border-l-2 border-sky-400 pl-4 text-sm leading-6 text-slate-300">
+                  {L(
+                    "This operating-company accounting module does not apply to an ETF or fund.",
+                    "Este módulo contable de compañías operativas no aplica a un ETF o fondo."
+                  )}
+                </div>
+              ) : earningsQualityAccountingRiskAnalysis ? (
+                <>
+                  <div className="mx-4 mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
+                    <div className="border-l-2 border-amber-300 pl-4">
+                      <p className="text-[10px] font-semibold uppercase text-amber-200">{L("Accounting read", "Lectura contable")}</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-200">{earningsQualityAccountingRiskAnalysis.summary}</p>
+                      <p className="mt-2 text-xs leading-5 text-slate-500">
+                        {L(
+                          "The agent identifies relationships to reconcile. It does not determine fraud or misconduct.",
+                          "El agente identifica relaciones que deben reconciliarse. No determina fraude ni conducta indebida."
+                        )}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <Readout
+                        label={L("Investigate", "Investigar")}
+                        value={earningsQualityAccountingRiskAnalysis.areas.filter((area) => area.investigationFlag.status === "investigate").length}
+                      />
+                      <Readout
+                        label={L("Watch", "Observar")}
+                        value={earningsQualityAccountingRiskAnalysis.areas.filter((area) => area.investigationFlag.status === "watch").length}
+                      />
+                      <Readout
+                        label={L("Data gaps", "Brechas")}
+                        value={earningsQualityAccountingRiskAnalysis.areas.filter((area) => area.investigationFlag.status === "data_gap").length}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mx-4 mt-6 border-y border-slate-800 py-4">
+                    <p className="text-[10px] font-semibold uppercase text-slate-400">
+                      {L("Priority investigation questions", "Preguntas prioritarias de investigación")}
+                    </p>
+                    <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-2 lg:grid-cols-2">
+                      {earningsQualityAccountingRiskAnalysis.prioritizedInvestigationQuestions.map((question, index) => (
+                        <p key={`${question}-${index}`} className="border-l border-amber-300/50 pl-3 text-xs leading-5 text-slate-300">
+                          {question}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-6 border-t border-slate-800">
+                    {EARNINGS_QUALITY_AREAS.map((definition, index) => {
+                      const area = earningsQualityAccountingRiskAnalysis.areas.find((item) => item.key === definition.key);
+                      if (!area) return null;
+                      const flagTone =
+                        area.investigationFlag.status === "investigate"
+                          ? "border-rose-400/35 bg-rose-400/10 text-rose-200"
+                          : area.investigationFlag.status === "watch"
+                            ? "border-amber-300/35 bg-amber-300/10 text-amber-100"
+                            : area.investigationFlag.status === "data_gap"
+                              ? "border-slate-700 bg-slate-900 text-slate-400"
+                              : "border-emerald-400/30 bg-emerald-400/10 text-emerald-200";
+                      return (
+                        <details key={definition.key} className="group border-b border-slate-800 px-4 py-1" open={index === 0}>
+                          <summary className="grid cursor-pointer list-none grid-cols-[34px_minmax(0,1fr)_auto] items-start gap-3 py-3 marker:content-none">
+                            <span className="font-mono text-xs font-semibold text-amber-300">{String(index + 1).padStart(2, "0")}</span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-slate-100">{earningsQualityLabels[definition.key]}</p>
+                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500 group-open:line-clamp-none">{area.conclusion}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={`rounded-md border px-2 py-1 text-[10px] font-semibold uppercase ${flagTone}`}>
+                                {area.investigationFlag.status.replace(/_/g, " ")}
+                              </span>
+                              <ChevronRight className="h-4 w-4 text-slate-600 transition-transform group-open:rotate-90" />
+                            </div>
+                          </summary>
+                          <div className="space-y-5 pb-6 pl-[46px]">
+                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)]">
+                              <div className="border-l border-amber-300/50 pl-3">
+                                <p className="text-[10px] font-semibold uppercase text-amber-200">{L("Formula", "Fórmula")}</p>
+                                <p className="mt-2 font-mono text-xs leading-5 text-slate-300">{area.investigationFlag.formula}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs leading-5 text-slate-300">{area.investigationFlag.mathematicalExplanation}</p>
+                                <p className="mt-2 text-xs leading-5 text-slate-500">{area.investigationFlag.whyInvestigate}</p>
+                              </div>
+                            </div>
+
+                            {area.multiYearTrend.length ? (
+                              <div className="overflow-x-auto border-y border-slate-800">
+                                <table className="w-full min-w-[760px] text-left text-xs">
+                                  <thead className="bg-slate-950/40 text-[10px] uppercase text-slate-500">
+                                    <tr>
+                                      <th className="px-3 py-2">{L("Period", "Periodo")}</th>
+                                      <th className="px-3 py-2">{L("Primary value", "Valor principal")}</th>
+                                      <th className="px-3 py-2">{L("Comparison", "Comparación")}</th>
+                                      <th className="px-3 py-2">{L("Calculated relationship", "Relación calculada")}</th>
+                                      <th className="px-3 py-2">{L("Source", "Fuente")}</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {area.multiYearTrend.map((point, pointIndex) => (
+                                      <tr key={`${point.period}-${pointIndex}`} className="border-t border-slate-800 align-top">
+                                        <td className="px-3 py-3 font-semibold text-slate-200">{point.period}</td>
+                                        <td className="px-3 py-3 text-slate-300">
+                                          <p>{formatAccountingMetric(point.primaryValue, localeTag)}</p>
+                                          <p className="mt-1 text-[10px] text-slate-600">{point.primaryLabel}</p>
+                                        </td>
+                                        <td className="px-3 py-3 text-slate-300">
+                                          <p>{formatAccountingMetric(point.comparisonValue, localeTag)}</p>
+                                          <p className="mt-1 text-[10px] text-slate-600">{point.comparisonLabel}</p>
+                                        </td>
+                                        <td className="px-3 py-3 font-semibold text-amber-100">{formatAccountingRelationship(point, localeTag)}</td>
+                                        <td className={point.source.status === "identified" ? "px-3 py-3 text-emerald-300" : "px-3 py-3 text-amber-300"}>
+                                          {point.source.sourceLabel}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <p className="border-l border-slate-700 pl-3 text-xs leading-5 text-slate-500">
+                                {L("No verified multi-year relationship could be calculated.", "No se pudo calcular una relación multianual verificada.")}
+                              </p>
+                            )}
+
+                            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                              <div>
+                                <p className="mb-2 text-[10px] font-semibold uppercase text-slate-300">{L("Documented evidence", "Evidencia documentada")}</p>
+                                <BusinessEvidenceList rows={area.documentedEvidence} />
+                              </div>
+                              <div>
+                                <p className="mb-2 text-[10px] font-semibold uppercase text-emerald-300">{L("Mitigating evidence", "Evidencia mitigante")}</p>
+                                <BusinessEvidenceList rows={area.mitigatingEvidence} />
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                              <div>
+                                <p className="mb-2 text-[10px] font-semibold uppercase text-amber-300">{L("Uncertainty", "Incertidumbre")}</p>
+                                <ul className="space-y-2 text-xs leading-5 text-slate-400">
+                                  {area.uncertainty.map((item, itemIndex) => <li key={`${item}-${itemIndex}`} className="border-l border-slate-700 pl-3">{item}</li>)}
+                                </ul>
+                              </div>
+                              <div>
+                                <p className="mb-2 text-[10px] font-semibold uppercase text-sky-300">{L("Information needed", "Información necesaria")}</p>
+                                <ul className="space-y-2 text-xs leading-5 text-slate-400">
+                                  {area.additionalInformation.map((item, itemIndex) => <li key={`${item}-${itemIndex}`} className="border-l border-slate-700 pl-3">{item}</li>)}
+                                </ul>
+                              </div>
+                            </div>
+                          </div>
+                        </details>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div className="mx-4 mt-5 border-l-2 border-slate-700 pl-4 text-sm leading-6 text-slate-500">
+                  {L(
+                    "Run Neuro Analysis to build the multi-year earnings-quality and accounting-risk dossier.",
+                    "Corre Neuro Analysis para construir el expediente multianual de calidad de ganancias y riesgo contable."
+                  )}
+                </div>
+              )}
+            </section>
+
             <div className={`${activeWorkspaceTab === "research" ? "" : "hidden"} rounded-xl border border-sky-500/25 bg-slate-900/75 p-5 shadow-lg shadow-slate-950/20`}>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="h-4 w-4 text-sky-300" />
-                    <h2 className="text-base font-semibold">{L("Company / ETF Profile 360", "Company / ETF Profile 360")}</h2>
+                    <h2 className="text-base font-semibold">{L("Research Controls", "Controles de Research")}</h2>
                   </div>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
                     {L(
-                      "Fast research card for quality, valuation, dividends, evidence, and portfolio risk.",
-                      "Tarjeta rápida de research para calidad, valoración, dividendos, evidencia y riesgo de cartera."
+                      "Numeric controls for financial evidence, valuation, dividends, source readiness, and portfolio risk. The three pre-valuation dossiers remain separate and are not reduced to synthetic scores.",
+                      "Controles numéricos para evidencia financiera, valoración, dividendos, fuentes y riesgo de cartera. Los tres expedientes previos a valoración permanecen separados y no se reducen a scores sintéticos."
                     )}
                   </p>
                 </div>
-                <div className="rounded-lg border border-slate-800 bg-slate-950/55 px-4 py-3 text-right">
-                  <p className="text-[11px] font-semibold uppercase text-slate-500">{L("Overall score", "Score general")}</p>
-                  <p className={`mt-1 text-2xl font-bold ${scoreTone(focusProfile360.overall)}`}>{focusProfile360.overall}</p>
+                <div className="rounded-lg border border-sky-400/25 bg-sky-400/5 px-4 py-3 text-right">
+                  <p className="text-[11px] font-semibold uppercase text-sky-300">{L("Business quality", "Calidad del negocio")}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-200">{L("Evidence, not a score", "Evidencia, no un score")}</p>
                 </div>
               </div>
 
               <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-5">
                 <ScoreBar
-                  label={L("Quality", "Calidad")}
-                  score={focusProfile360.qualityScore}
-                  hint={L("Margins, balance sheet, history, and data quality.", "Márgenes, balance, historial y calidad de data.")}
+                  label={L("Financial data", "Data financiera")}
+                  score={focusProfile360.financialEvidenceScore}
+                  hint={L("Margins, leverage, history, and data availability only.", "Márgenes, deuda, historial y disponibilidad de data solamente.")}
                 />
                 <ScoreBar
                   label={L("Valuation", "Valoración")}
@@ -3072,6 +6106,241 @@ export default function NeuroAnalysisPage() {
                 <Readout label={L("Latest report", "Último reporte")} value={agentReport ? L("Available", "Disponible") : L("Pending", "Pendiente")} />
               </div>
             </div>
+
+            <div className={`${activeWorkspaceTab === "research" ? "" : "hidden"} rounded-xl border border-emerald-500/25 bg-slate-900/75 p-5 shadow-lg shadow-slate-950/20`}>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-emerald-300" />
+                    <h2 className="text-base font-semibold">{L("Investment Governance", "Gobernanza de inversión")}</h2>
+                  </div>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                    {L(
+                      "Policy, evidence, valuation, AI interpretation, and human decision stay connected in one auditable flow.",
+                      "Política, evidencia, valoración, interpretación AI y decisión humana quedan unidos en un flujo auditable."
+                    )}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                  <div className={`rounded-lg border px-3 py-2 text-xs font-semibold ${systemDispositionTone(currentDecisionSupport?.systemDisposition?.code)}`}>
+                    {systemDispositionLabel(currentDecisionSupport?.systemDisposition?.code)}
+                  </div>
+                  <div className={`rounded-lg border px-3 py-2 text-xs font-semibold ${decisionStateTone(currentDecisionSupport?.suggestedState)}`}>
+                    {L("Research", "Research")}: {decisionStateLabel(currentDecisionSupport?.suggestedState)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+                <Readout
+                  label={L("System posture", "Postura del sistema")}
+                  value={systemDispositionLabel(currentDecisionSupport?.systemDisposition?.code)}
+                  hint={L("Not a trade instruction", "No es una orden de trading")}
+                />
+                <Readout
+                  label={L("Policy gate", "Compuerta policy")}
+                  value={
+                    policyLoading
+                      ? L("Loading", "Cargando")
+                      : investmentPolicy?.status === "active"
+                        ? L("Active", "Activa")
+                        : L("Draft", "Draft")
+                  }
+                  hint={investmentPolicy?.version ? `v${investmentPolicy.version}` : L("Needs approval", "Necesita aprobación")}
+                />
+                <Readout
+                  label={L("Committee review", "Revisión de comité")}
+                  value={currentDecisionSupport?.committeeReviewEligible ? L("Eligible", "Elegible") : L("Not ready", "No lista")}
+                  hint={currentDecisionSupport?.blockingReasons?.[0] ?? L("Research may advance; AI cannot approve", "Research puede avanzar; AI no aprueba")}
+                />
+                <Readout
+                  label={L("Evidence completeness", "Integridad de evidencia")}
+                  value={
+                    currentDecisionSupport?.evidenceCompleteness === "sufficient"
+                      ? L("Sufficient", "Suficiente")
+                      : currentDecisionSupport?.evidenceCompleteness === "partial"
+                        ? L("Partial", "Parcial")
+                        : currentDecisionSupport?.evidenceCompleteness === "insufficient"
+                          ? L("Insufficient", "Insuficiente")
+                          : "-"
+                  }
+                  hint={L("Not an investment probability", "No es probabilidad de inversión")}
+                />
+                <Readout
+                  label={L("Committee packets", "Packets del comité")}
+                  value={committeePackets.length}
+                  hint={committeeDecisions.length ? `${committeeDecisions.length} ${L("human decision(s)", "decisión(es) humana(s)")}` : L("No approval yet", "Sin aprobación")}
+                />
+              </div>
+
+              {currentDecisionSupport ? (
+                <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-6">
+                  <ScoreBar
+                    label={L("Financial data", "Data financiera")}
+                    score={currentDecisionSupport.scorecard.financialEvidence ?? currentDecisionSupport.scorecard.businessQuality ?? 0}
+                  />
+                  <ScoreBar label={L("Value", "Valor")} score={currentDecisionSupport.scorecard.valuationDiscipline} />
+                  <ScoreBar label={L("Evidence", "Evidencia")} score={currentDecisionSupport.scorecard.evidenceIntegrity} />
+                  <ScoreBar label={L("Durability", "Durabilidad")} score={currentDecisionSupport.scorecard.financialDurability} />
+                  <ScoreBar label={L("Portfolio", "Portfolio")} score={currentDecisionSupport.scorecard.portfolioFit} />
+                  <ScoreBar label={L("Market", "Mercado")} score={currentDecisionSupport.scorecard.marketContext} />
+                </div>
+              ) : null}
+
+              {currentDecisionSupport?.missingRequirements?.length ? (
+                <div className="mt-4 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-xs leading-5 text-amber-100">
+                  <p className="font-semibold">{L("Open requirements before committee review", "Requisitos antes de revisión del comité")}</p>
+                  <p className="mt-1 text-amber-100/80">{currentDecisionSupport.missingRequirements.slice(0, 5).join(" / ")}</p>
+                </div>
+              ) : null}
+
+              {currentDecisionSupport?.systemDisposition ? (
+                <div className={`mt-4 border-l-2 px-4 py-2 text-xs leading-5 ${
+                  currentDecisionSupport.systemDisposition.code === "NEED_MORE_INFORMATION"
+                    ? "border-amber-300 text-amber-100/90"
+                    : currentDecisionSupport.systemDisposition.code === "THESIS_UNCERTAIN"
+                      ? "border-violet-300 text-violet-100/90"
+                      : currentDecisionSupport.systemDisposition.code === "KEEP_CASH"
+                        ? "border-cyan-300 text-cyan-100/90"
+                        : "border-slate-600 text-slate-300"
+                }`}>
+                  <p className="font-semibold">
+                    {currentDecisionSupport.systemDisposition.basis[0]}
+                  </p>
+                  <p className="mt-1 text-slate-500">
+                    {L("Deterministic policy", "Política determinística")} v{currentDecisionSupport.systemDisposition.policyVersion}. {L("A human remains accountable for the decision.", "La decisión sigue bajo responsabilidad humana.")}
+                  </p>
+                </div>
+              ) : null}
+
+              <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.78fr)]">
+                <div className="rounded-lg border border-slate-800 bg-slate-950/45 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase text-slate-500">{L("Investment policy", "Política de inversión")}</p>
+                    <span className="text-[11px] text-slate-500">
+                      {investmentPolicy?.approvedAt
+                        ? `${L("Approved", "Aprobada")} ${new Date(investmentPolicy.approvedAt).toLocaleDateString(localeTag)}`
+                        : L("Draft not approved", "Draft sin aprobar")}
+                    </span>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-4">
+                    <label className="block lg:col-span-2">
+                      <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Universe", "Universo")}</span>
+                      <input
+                        value={policyDraft.universe}
+                        onChange={(event) => setPolicyDraft((prev) => ({ ...prev, universe: event.target.value }))}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-emerald-400"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Horizon", "Horizonte")}</span>
+                      <input
+                        inputMode="numeric"
+                        value={policyDraft.horizonYears}
+                        onChange={(event) => setPolicyDraft((prev) => ({ ...prev, horizonYears: event.target.value }))}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-emerald-400"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Benchmark", "Benchmark")}</span>
+                      <input
+                        value={policyDraft.benchmark}
+                        onChange={(event) => setPolicyDraft((prev) => ({ ...prev, benchmark: event.target.value.toUpperCase().slice(0, 24) }))}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-emerald-400"
+                      />
+                    </label>
+                  </div>
+                  <label className="mt-3 block">
+                    <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Strategy", "Estrategia")}</span>
+                    <textarea
+                      value={policyDraft.strategy}
+                      onChange={(event) => setPolicyDraft((prev) => ({ ...prev, strategy: event.target.value }))}
+                      rows={3}
+                      className="mt-1 w-full resize-none rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm leading-6 text-slate-100 outline-none focus:border-emerald-400"
+                    />
+                  </label>
+                  <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+                    <label className="block">
+                      <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Max position %", "Max posición %")}</span>
+                      <input
+                        inputMode="decimal"
+                        value={policyDraft.maxPositionPct}
+                        onChange={(event) => setPolicyDraft((prev) => ({ ...prev, maxPositionPct: event.target.value }))}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-emerald-400"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Max sector %", "Max sector %")}</span>
+                      <input
+                        inputMode="decimal"
+                        value={policyDraft.maxSectorPct}
+                        onChange={(event) => setPolicyDraft((prev) => ({ ...prev, maxSectorPct: event.target.value }))}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-emerald-400"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Allowed instruments", "Instrumentos")}</span>
+                      <input
+                        value={policyDraft.allowedInstruments}
+                        onChange={(event) => setPolicyDraft((prev) => ({ ...prev, allowedInstruments: event.target.value }))}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:border-emerald-400"
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void saveInvestmentPolicy(false)}
+                      disabled={policySaving}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200 disabled:opacity-50"
+                    >
+                      {policySaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                      {L("Save draft", "Guardar draft")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveInvestmentPolicy(true)}
+                      disabled={policySaving}
+                      className="inline-flex items-center gap-2 rounded-lg bg-emerald-400 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-50"
+                    >
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      {L("Approve policy", "Aprobar policy")}
+                    </button>
+                  </div>
+                  {policyStatus ? <p className="mt-3 text-xs text-emerald-300">{policyStatus}</p> : null}
+                  {policyError ? <p className="mt-3 text-xs text-rose-300">{policyError}</p> : null}
+                </div>
+
+                <div className="rounded-lg border border-cyan-400/25 bg-cyan-400/5 p-4">
+                  <p className="text-xs font-semibold uppercase text-cyan-300">{L("Investment Committee handoff", "Entrega al Comité de Inversión")}</p>
+                  <p className="mt-3 text-sm leading-6 text-slate-300">
+                    {L(
+                      "Research can prepare a proposal, but it cannot approve capital. Freeze the current report into a committee packet, review every classified claim and source, then record the human decision in the Committee workspace.",
+                      "Research puede preparar una propuesta, pero no puede aprobar capital. Congela el reporte actual en un packet, revisa cada afirmación clasificada y su fuente, y registra la decisión humana en el workspace del Comité."
+                    )}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (committeePackets.length) setActiveWorkspaceTab("committee");
+                      else void createInvestmentCommitteePacket();
+                    }}
+                    disabled={committeeGenerating || !activeCaseId || !activeReportId}
+                    className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-200 disabled:opacity-50"
+                  >
+                    {committeeGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronRight className="h-4 w-4" />}
+                    {committeePackets.length
+                      ? L("Open Investment Committee", "Abrir Comité de Inversión")
+                      : L("Create committee packet", "Crear packet del comité")}
+                  </button>
+                  <p className="mt-3 text-xs leading-5 text-slate-500">
+                    {committeeDecisions.some((decision) => decision.portfolio_eligible)
+                      ? L("A human-approved packet exists for this case.", "Existe un packet aprobado por una persona para este caso.")
+                      : L("Portfolio eligibility remains blocked until a human marks a packet APPROVED.", "La elegibilidad de cartera sigue bloqueada hasta que una persona marque un packet APPROVED.")}
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <aside className={activeWorkspaceTab === "research" ? "space-y-5 xl:sticky xl:top-24 xl:self-start" : "hidden"}>
@@ -3082,8 +6351,8 @@ export default function NeuroAnalysisPage() {
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-300">
                 {L(
-                  "Run the current profile through market data, evidence, valuation, dividends, and thesis review.",
-                  "Corre el profile actual con data de mercado, evidencia, valoración, dividendos y revisión de tesis."
+                  "State the working investment thesis or research question. Neuro will test it against evidence, valuation, and an independent bear case.",
+                  "Escribe la tesis de inversión de trabajo o pregunta de research. Neuro la probará contra evidencia, valoración y un caso bajista independiente."
                 )}
               </p>
 
@@ -3094,7 +6363,7 @@ export default function NeuroAnalysisPage() {
               </div>
 
               <label className="mt-4 block">
-                <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Research question", "Pregunta de research")}</span>
+                <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Working thesis / research question", "Tesis de trabajo / pregunta de research")}</span>
                 <textarea
                   value={researchGoal}
                   onChange={(event) => setResearchGoal(event.target.value)}
@@ -3103,26 +6372,44 @@ export default function NeuroAnalysisPage() {
                 />
               </label>
 
-              <button
-                type="button"
-                onClick={() => void runNeuroAgent()}
-                disabled={agentLoading || !focusTicker.trim()}
-                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-400 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {agentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                {agentLoading
-                  ? agentElapsedSeconds < 15
-                    ? L("Preparing evidence...", "Preparando evidencia...")
-                    : agentElapsedSeconds < 45
-                      ? L("Reviewing documents...", "Revisando documentos...")
-                      : agentElapsedSeconds < 90
-                        ? L("Testing valuation...", "Validando valoración...")
-                        : L("Finalizing report...", "Finalizando informe...")
-                  : L("Run profile intelligence", "Correr inteligencia del profile")}
-              </button>
-              {agentLoading ? (
+              <div className="mt-4 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => void autoBuildEvidenceAndRun()}
+                  disabled={agentLoading || autoRunLoading || documentBatchImporting || documentLookupLoading || !focusTicker.trim()}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-400 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {autoRunLoading || agentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  {autoRunLoading || agentLoading
+                    ? autoRunStatus ||
+                      (agentElapsedSeconds < 15
+                        ? L("Preparing evidence...", "Preparando evidencia...")
+                        : agentElapsedSeconds < 45
+                          ? L("Analyzing the business...", "Analizando el negocio...")
+                          : agentElapsedSeconds < 110
+                            ? L("Testing valuation...", "Validando valoración...")
+                            : agentElapsedSeconds < 180
+                              ? L("Challenging the thesis...", "Retando la tesis...")
+                              : L("Finalizing report...", "Finalizando informe..."))
+                    : L("Auto-build evidence + run AI", "Construir evidencia + correr AI")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAutoRunStatus("");
+                    void runNeuroAgent();
+                  }}
+                  disabled={agentLoading || autoRunLoading || !focusTicker.trim()}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-4 py-2.5 text-xs font-semibold text-slate-200 hover:border-sky-400 hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {agentLoading && !autoRunLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                  {L("Run with current evidence only", "Correr solo con evidencia actual")}
+                </button>
+              </div>
+              {agentLoading || autoRunStatus ? (
                 <p className="mt-2 text-center text-xs tabular-nums text-slate-500">
-                  {L("Evidence-backed analysis", "Análisis con evidencia")} · {agentElapsedSeconds}s
+                  {autoRunStatus || L("Evidence-backed analysis", "Análisis con evidencia")}
+                  {agentLoading ? ` · ${agentElapsedSeconds}s` : ""}
                 </p>
               ) : null}
               {agentError ? <p className="mt-3 text-xs text-rose-300">{agentError}</p> : null}
@@ -3142,8 +6429,8 @@ export default function NeuroAnalysisPage() {
                       "Los profiles de ETF/fondo usan estrategia, holdings, costos, yield, liquidez e historial de mercado."
                     )
                   : L(
-                      "Import official annual and quarterly filings here, or upload your own PDFs.",
-                      "Importa aquí los reportes anuales y trimestrales oficiales, o sube tus propios PDFs."
+                      "Import official annual and quarterly filings from SEC, or upload your own 10-K/10-Q PDFs.",
+                      "Importa filings oficiales anuales y trimestrales desde SEC, o sube tus propios PDFs 10-K/10-Q."
                     )}
               </p>
 
@@ -3624,54 +6911,532 @@ export default function NeuroAnalysisPage() {
           </section>
         ) : null}
 
+        {activeWorkspaceTab === "research" && Array.isArray(engineSnapshot?.positions) && engineSnapshot.positions.length > 0 ? (
+          <section className="border-y border-amber-300/25 bg-amber-300/[0.025] py-6">
+            <div className="flex flex-col gap-3 px-5 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-4xl">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4 text-amber-300" />
+                  <h2 className="text-base font-semibold">
+                    {L("Reverse DCF: Market-Implied Expectations", "Reverse DCF: Expectativas implícitas del mercado")}
+                  </h2>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  {L(
+                    "Multiple combinations that approximately reconcile today's enterprise value. They are mathematical cases, not forecasts, probabilities, or trade instructions.",
+                    "Múltiples combinaciones que aproximan el enterprise value de hoy. Son casos matemáticos, no pronósticos, probabilidades ni instrucciones de inversión."
+                  )}
+                </p>
+              </div>
+              <span className="w-fit rounded-md border border-amber-300/30 bg-amber-300/10 px-3 py-1.5 text-[10px] font-semibold uppercase text-amber-100">
+                {L("No single implied scenario", "Sin un único escenario implícito")}
+              </span>
+            </div>
+
+            <div className="mt-6">
+              {engineSnapshot.positions.map((position: any, positionIndex: number) => {
+                const reverse = position?.reverseDcf;
+                if (!reverse) return null;
+                if (reverse.status === "not_applicable" || reverse.status === "insufficient_information") {
+                  return (
+                    <div
+                      key={(position?.ticker || "reverse") + "-" + positionIndex}
+                      className="border-t border-slate-800 px-5 py-5"
+                    >
+                      <p className="text-sm font-semibold text-slate-200">{position?.ticker}</p>
+                      <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-500">
+                        {reverse.limitations?.[0] ||
+                          L(
+                            "Reverse DCF requires current valuation, revenue, and operating-margin data.",
+                            "Reverse DCF requiere valoración actual, revenue y margen operativo."
+                          )}
+                      </p>
+                    </div>
+                  );
+                }
+
+                const history = reverse.historicalPerformance ?? {};
+                const scenarios = Array.isArray(reverse.impliedScenarios) ? reverse.impliedScenarios : [];
+                return (
+                  <div
+                    key={(position?.ticker || "reverse") + "-" + positionIndex}
+                    className="border-t border-slate-800 px-5 py-6 first:mt-0"
+                  >
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase text-amber-200">
+                          {L("Market expectation profile", "Perfil de expectativas del mercado")}
+                        </p>
+                        <h3 className="mt-2 text-lg font-semibold text-slate-50">
+                          {position?.company?.name || position?.ticker}
+                        </h3>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {L(
+                            "Enterprise value is reconciled through paired operating assumptions.",
+                            "El enterprise value se reconcilia mediante supuestos operativos combinados."
+                          )}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4 xl:min-w-[680px]">
+                        <Readout
+                          label={L("Price today", "Precio hoy")}
+                          value={reverse?.marketInputs?.currentPrice == null ? "-" : formatCurrency(reverse.marketInputs.currentPrice, localeTag)}
+                        />
+                        <Readout
+                          label={L("Implied EV", "EV implícito")}
+                          value={formatCompactCurrency(reverse?.marketInputs?.targetEnterpriseValue, localeTag)}
+                          hint={reverse?.marketInputs?.cashAssumedZero ? L("Cash missing", "Falta cash") : undefined}
+                        />
+                        <Readout
+                          label={L("Historical revenue CAGR", "CAGR histórico de revenue")}
+                          value={formatPercentPoints(history?.revenueCagrPct, localeTag)}
+                        />
+                        <Readout
+                          label={L("Model horizon", "Horizonte del modelo")}
+                          value={scenarios?.[0]?.horizonYears ?? "-"}
+                          hint={L("Years", "Años")}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-5 overflow-x-auto border-y border-slate-800">
+                      <table className="w-full min-w-[1180px] text-left text-xs">
+                        <thead className="bg-slate-950/45 text-[10px] uppercase text-slate-500">
+                          <tr>
+                            <th className="px-3 py-2">{L("Combination", "Combinación")}</th>
+                            <th className="px-3 py-2">{L("Revenue growth", "Crecimiento revenue")}</th>
+                            <th className="px-3 py-2">{L("Target margin", "Margen objetivo")}</th>
+                            <th className="px-3 py-2">{L("Reinvestment", "Reinversión")}</th>
+                            <th className="px-3 py-2">{L("Implied ROIIC", "ROIIC implícito")}</th>
+                            <th className="px-3 py-2">{L("Tax", "Impuesto")}</th>
+                            <th className="px-3 py-2">{L("Cost of capital", "Costo de capital")}</th>
+                            <th className="px-3 py-2">{L("Terminal growth", "Crecimiento terminal")}</th>
+                            <th className="px-3 py-2">{L("Implied price", "Precio implícito")}</th>
+                            <th className="px-3 py-2">{L("History check", "Chequeo histórico")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {scenarios.map((scenario: any) => {
+                            const growthComparison = scenario.historicalComparison?.find(
+                              (row: any) => row.metric === "revenue_growth"
+                            );
+                            const marginComparison = scenario.historicalComparison?.find(
+                              (row: any) => row.metric === "operating_margin"
+                            );
+                            return (
+                              <tr key={scenario.id} className="border-t border-slate-800 align-top">
+                                <td className="px-3 py-3">
+                                  <p className="font-semibold text-slate-100">
+                                    {reverseDcfScenarioLabel(scenario.id, lang)}
+                                  </p>
+                                  <p className="mt-1 text-[10px] uppercase text-slate-600">
+                                    {scenario.solutionStatus === "solved"
+                                      ? L("Reconciled", "Reconciliado")
+                                      : L("Outside range", "Fuera del rango")}
+                                  </p>
+                                </td>
+                                <td className="px-3 py-3 font-semibold text-amber-100">
+                                  {formatPercentPoints(scenario.revenueGrowthPct, localeTag)}
+                                </td>
+                                <td className="px-3 py-3 text-slate-300">
+                                  {formatPercentPoints(scenario.targetOperatingMarginPct, localeTag)}
+                                </td>
+                                <td className="px-3 py-3 text-slate-300">
+                                  {formatPercentPoints(scenario.reinvestmentRatePct, localeTag)}
+                                </td>
+                                <td className="px-3 py-3 text-slate-300">
+                                  {formatPercentPoints(scenario.impliedReturnOnIncrementalCapitalPct, localeTag)}
+                                </td>
+                                <td className="px-3 py-3 text-slate-300">
+                                  {formatPercentPoints(scenario.taxRatePct, localeTag)}
+                                </td>
+                                <td className="px-3 py-3 text-slate-300">
+                                  {formatPercentPoints(scenario.costOfCapitalPct, localeTag)}
+                                </td>
+                                <td className="px-3 py-3 text-slate-300">
+                                  {formatPercentPoints(scenario.terminalGrowthPct, localeTag)}
+                                </td>
+                                <td className="px-3 py-3">
+                                  <p className="font-semibold text-slate-100">
+                                    {scenario.impliedPrice == null ? "-" : formatCurrency(scenario.impliedPrice, localeTag)}
+                                  </p>
+                                  <p className="mt-1 text-[10px] text-slate-500">
+                                    {L("Gap", "Brecha")} {scenario.valuationGapPct == null ? "-" : formatPercent(scenario.valuationGapPct, localeTag)}
+                                  </p>
+                                </td>
+                                <td className="px-3 py-3 text-[10px] uppercase leading-5 text-slate-500">
+                                  <p>{L("Growth", "Growth")}: {String(growthComparison?.assessment ?? "unavailable").replace(/_/g, " ")}</p>
+                                  <p>{L("Margin", "Margen")}: {String(marginComparison?.assessment ?? "unavailable").replace(/_/g, " ")}</p>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="mt-6 grid grid-cols-1 gap-6 2xl:grid-cols-2">
+                      {(reverse.sensitivityTables ?? []).map((table: any) => {
+                        const rowLabel = table.rowMetric === "revenue_growth"
+                          ? L("Revenue growth", "Crecimiento revenue")
+                          : L("Cost of capital", "Costo de capital");
+                        const columnLabel = table.columnMetric === "operating_margin"
+                          ? L("Operating margin", "Margen operativo")
+                          : L("Terminal growth", "Crecimiento terminal");
+                        return (
+                          <div key={table.rowMetric + "-" + table.columnMetric}>
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="text-[10px] font-semibold uppercase text-slate-300">
+                                {rowLabel} × {columnLabel}
+                              </p>
+                              <p className="text-[10px] text-sky-300">
+                                {L("Blue = near today's price", "Azul = cerca del precio actual")}
+                              </p>
+                            </div>
+                            <div className="mt-3 overflow-x-auto">
+                              <table className="w-full min-w-[560px] table-fixed text-center text-[10px]">
+                                <thead>
+                                  <tr>
+                                    <th className="w-20 px-1 py-2 text-left text-slate-600">{rowLabel}</th>
+                                    {(table.columnValuesPct ?? []).map((columnValue: number) => (
+                                      <th key={columnValue} className="px-1 py-2 font-semibold text-slate-500">
+                                        {formatPercentPoints(columnValue, localeTag)}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(table.rowValuesPct ?? []).map((rowValue: number) => (
+                                    <tr key={rowValue}>
+                                      <th className="px-1 py-2 text-left font-semibold text-slate-500">
+                                        {formatPercentPoints(rowValue, localeTag)}
+                                      </th>
+                                      {(table.columnValuesPct ?? []).map((columnValue: number) => {
+                                        const cell = (table.cells ?? []).find(
+                                          (item: any) =>
+                                            item.rowValuePct === rowValue &&
+                                            item.columnValuePct === columnValue
+                                        );
+                                        return (
+                                          <td key={columnValue} className="p-1">
+                                            <div className={"min-h-14 border px-2 py-2 " + reverseDcfCellTone(cell?.valuationGapPct)}>
+                                              <p className="font-semibold">
+                                                {cell?.impliedPrice != null
+                                                  ? formatCurrency(cell.impliedPrice, localeTag)
+                                                  : cell?.impliedEquityValue != null
+                                                    ? formatCompactCurrency(cell.impliedEquityValue, localeTag)
+                                                    : "-"}
+                                              </p>
+                                              <p className="mt-1 text-[9px] opacity-70">
+                                                {cell?.valuationGapPct == null ? "-" : formatPercent(cell.valuationGapPct, localeTag)}
+                                              </p>
+                                            </div>
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-7 grid grid-cols-1 gap-7 border-t border-slate-800 pt-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase text-amber-200">
+                          {L(
+                            "What must this company achieve for today's market price to make sense?",
+                            "¿Qué debe lograr esta compañía para que el precio de hoy tenga sentido?"
+                          )}
+                        </p>
+                        <div className="mt-3 space-y-3">
+                          {(reverse.whatMustBeTrue ?? []).map((item: string, itemIndex: number) => (
+                            <p
+                              key={itemIndex}
+                              className="border-l-2 border-amber-300/60 pl-4 text-sm leading-6 text-slate-200"
+                            >
+                              {item}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase text-sky-300">
+                          {L("Industry evidence to verify", "Evidencia de industria por verificar")}
+                        </p>
+                        <ul className="mt-3 space-y-2 text-xs leading-5 text-slate-400">
+                          {(reverse.industryEvidenceRequirements ?? []).map((item: string, itemIndex: number) => (
+                            <li key={itemIndex} className="border-l border-slate-700 pl-3">{item}</li>
+                          ))}
+                        </ul>
+                        <p className="mt-4 text-xs leading-5 text-slate-500">
+                          {L(
+                            "The research report compares these assumptions with dated industry evidence when comparable evidence is available.",
+                            "El reporte de research compara estos supuestos con evidencia fechada de la industria cuando existe evidencia comparable."
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
+        {activeWorkspaceTab === "research" && independentBearCaseAnalysis ? (
+          <section className="border-y border-rose-300/25 bg-rose-300/[0.025] py-6">
+            <div className="px-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-4xl">
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="h-4 w-4 text-rose-300" />
+                    <h2 className="text-base font-semibold">
+                      {L("Independent Bear Case", "Caso Bajista Independiente")}
+                    </h2>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    {L(
+                      "An adversarial test of the working thesis, completed before the final report and without access to a Bull Agent recommendation.",
+                      "Una prueba adversarial de la tesis de trabajo, completada antes del reporte final y sin acceso a una recomendación del Bull Agent."
+                    )}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 text-[10px] font-semibold uppercase">
+                  <span className="rounded-md border border-rose-300/30 bg-rose-300/10 px-2.5 py-1.5 text-rose-100">
+                    {independentBearCaseAnalysis.status.replace(/_/g, " ")}
+                  </span>
+                  <span className="rounded-md border border-slate-700 bg-slate-950/60 px-2.5 py-1.5 text-slate-300">
+                    {L("Bull recommendation excluded", "Recomendación bull excluida")}
+                  </span>
+                  <span className="rounded-md border border-slate-700 bg-slate-950/60 px-2.5 py-1.5 text-slate-300">
+                    {L("No probability", "Sin probabilidad")}
+                  </span>
+                </div>
+              </div>
+
+              {independentBearCaseAnalysis.status === "not_applicable" ? (
+                <p className="mt-5 border-l-2 border-slate-700 pl-4 text-sm leading-6 text-slate-400">
+                  {independentBearCaseAnalysis.strongestBearArgument}
+                </p>
+              ) : (
+                <>
+                  <div className="mt-6 grid grid-cols-1 gap-px overflow-hidden border border-slate-800 bg-slate-800 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)]">
+                    <div className="bg-slate-950/70 p-5">
+                      <p className="text-[10px] font-semibold uppercase text-rose-200">
+                        {L("Strongest supported bear argument", "Argumento bajista mejor sustentado")}
+                      </p>
+                      <p className="mt-3 text-lg font-semibold leading-7 text-slate-50">
+                        {independentBearCaseAnalysis.strongestBearArgument}
+                      </p>
+                      <p className="mt-4 line-clamp-3 text-xs leading-5 text-slate-500">
+                        {L("Working thesis tested", "Tesis de trabajo evaluada")}: {independentBearCaseAnalysis.investmentThesis}
+                      </p>
+                    </div>
+                    <div className="bg-slate-950/55 p-5">
+                      <p className="text-[10px] font-semibold uppercase text-amber-200">
+                        {L("Potential financial impact", "Impacto financiero potencial")}
+                      </p>
+                      <p className="mt-3 text-sm leading-6 text-slate-200">
+                        {independentBearCaseAnalysis.potentialFinancialImpact}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-px grid grid-cols-1 gap-px bg-slate-800 md:grid-cols-3">
+                    {[
+                      {
+                        label: L("Indicators to monitor", "Indicadores a monitorear"),
+                        rows: independentBearCaseAnalysis.indicatorsToMonitor,
+                        tone: "text-sky-200",
+                      },
+                      {
+                        label: L("Would confirm the bear thesis", "Confirmaría la tesis bajista"),
+                        rows: independentBearCaseAnalysis.confirmationConditions,
+                        tone: "text-rose-200",
+                      },
+                      {
+                        label: L("Would invalidate it", "La invalidaría"),
+                        rows: independentBearCaseAnalysis.invalidationConditions,
+                        tone: "text-emerald-200",
+                      },
+                    ].map((column) => (
+                      <div key={column.label} className="bg-slate-950/55 p-4">
+                        <p className={`text-[10px] font-semibold uppercase ${column.tone}`}>{column.label}</p>
+                        <ul className="mt-3 space-y-2 text-xs leading-5 text-slate-300">
+                          {column.rows.slice(0, 5).map((row, index) => (
+                            <li key={`${column.label}-${index}`} className="border-l border-slate-700 pl-3">{row}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-7 border-t border-slate-800">
+                    {BEAR_CASE_AREAS.map((definition, index) => {
+                      const area = independentBearCaseAnalysis.areas.find((item) => item.key === definition.key);
+                      if (!area) return null;
+                      const statusTone =
+                        area.status === "supported"
+                          ? "border-rose-300/35 bg-rose-300/10 text-rose-100"
+                          : area.status === "partially_supported"
+                            ? "border-amber-300/35 bg-amber-300/10 text-amber-100"
+                            : area.status === "not_supported"
+                              ? "border-emerald-300/35 bg-emerald-300/10 text-emerald-100"
+                              : "border-slate-700 bg-slate-950/60 text-slate-400";
+                      return (
+                        <details key={definition.key} className="group border-b border-slate-800 py-1">
+                          <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-2 py-3">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <span className="text-[10px] font-semibold text-slate-600">{String(index + 1).padStart(2, "0")}</span>
+                              <div className="min-w-0">
+                                <p className="font-semibold text-slate-100">{bearCaseLabels[definition.key]}</p>
+                                <p className="mt-1 line-clamp-1 text-xs text-slate-500">{area.argument}</p>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-3">
+                              <span className={`rounded-md border px-2 py-1 text-[9px] font-semibold uppercase ${statusTone}`}>
+                                {area.status.replace(/_/g, " ")}
+                              </span>
+                              <ChevronRight className="h-4 w-4 text-slate-600 transition-transform group-open:rotate-90" />
+                            </div>
+                          </summary>
+                          <div className="grid grid-cols-1 gap-px border-t border-slate-800 bg-slate-800 lg:grid-cols-2">
+                            <div className="bg-slate-950/60 p-4">
+                              <p className="text-[10px] font-semibold uppercase text-rose-200">
+                                {L("Evidence supporting the bear argument", "Evidencia que apoya el argumento bajista")}
+                              </p>
+                              <div className="mt-3 space-y-3">
+                                {area.supportingEvidence.map((evidence, evidenceIndex) => (
+                                  <div key={evidenceIndex} className="border-l-2 border-rose-300/40 pl-3 text-xs leading-5">
+                                    <p className="text-slate-200">{evidence.statement}</p>
+                                    <p className="mt-1 text-[10px] text-slate-600">
+                                      {evidence.sourceLabel}{evidence.sourceDate ? ` / ${evidence.sourceDate}` : ""}
+                                      {evidence.sourceUrl ? (
+                                        <a href={evidence.sourceUrl} target="_blank" rel="noreferrer" className="ml-2 text-cyan-300 hover:text-cyan-200">
+                                          {L("Source", "Fuente")}
+                                        </a>
+                                      ) : null}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="bg-slate-950/60 p-4">
+                              <p className="text-[10px] font-semibold uppercase text-emerald-200">
+                                {L("Contradictory or mitigating evidence", "Evidencia contradictoria o mitigante")}
+                              </p>
+                              <div className="mt-3 space-y-3">
+                                {area.contradictoryEvidence.map((evidence, evidenceIndex) => (
+                                  <div key={evidenceIndex} className="border-l-2 border-emerald-300/40 pl-3 text-xs leading-5">
+                                    <p className="text-slate-200">{evidence.statement}</p>
+                                    <p className="mt-1 text-[10px] text-slate-600">
+                                      {evidence.sourceLabel}{evidence.sourceDate ? ` / ${evidence.sourceDate}` : ""}
+                                      {evidence.sourceUrl ? (
+                                        <a href={evidence.sourceUrl} target="_blank" rel="noreferrer" className="ml-2 text-cyan-300 hover:text-cyan-200">
+                                          {L("Source", "Fuente")}
+                                        </a>
+                                      ) : null}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 gap-px bg-slate-800 md:grid-cols-2 xl:grid-cols-4">
+                            {[
+                              { label: L("Financial mechanism", "Mecanismo financiero"), rows: [area.potentialFinancialImpact] },
+                              { label: L("Monitor", "Monitorear"), rows: area.indicatorsToMonitor },
+                              { label: L("Confirm", "Confirmar"), rows: area.confirmationConditions },
+                              { label: L("Invalidate", "Invalidar"), rows: area.invalidationConditions },
+                            ].map((item) => (
+                              <div key={item.label} className="bg-slate-950/45 p-4">
+                                <p className="text-[10px] font-semibold uppercase text-slate-500">{item.label}</p>
+                                <ul className="mt-2 space-y-2 text-xs leading-5 text-slate-300">
+                                  {item.rows.slice(0, 4).map((row, rowIndex) => <li key={rowIndex}>{row}</li>)}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      );
+                    })}
+                  </div>
+
+                  {independentBearCaseAnalysis.missingInformation.length ? (
+                    <div className="mt-6 border-l-2 border-amber-300/50 pl-4">
+                      <p className="text-[10px] font-semibold uppercase text-amber-200">
+                        {L("Material evidence still needed", "Evidencia material pendiente")}
+                      </p>
+                      <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">
+                        {independentBearCaseAnalysis.missingInformation.slice(0, 8).map((item, index) => <li key={index}>- {item}</li>)}
+                      </ul>
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+          </section>
+        ) : null}
+
         {activeWorkspaceTab === "research" && engineSnapshot ? (
           <section className="rounded-xl border border-emerald-500/25 bg-slate-900/80 p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-emerald-300" />
                 <h2 className="text-base font-semibold">
-                  {L("Investment Decision Simulation", "Simulación de decisión de inversión")}
+                  {L("Portfolio Research Snapshot", "Snapshot de research del portfolio")}
                 </h2>
               </div>
               <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3 sm:min-w-[520px]">
                 <Readout
-                  label={L("Current projection", "Proyección actual")}
-                  value={formatCurrency(engineSnapshot?.simulation?.currentProjectedValue, localeTag)}
-                  hint={formatPercent(engineSnapshot?.simulation?.currentExpectedReturn, localeTag)}
+                  label={L("Positions", "Posiciones")}
+                  value={engineSnapshot?.positions?.length ?? 0}
+                  hint={L("Research universe", "Universo de research")}
                 />
                 <Readout
-                  label={L("Suggested projection", "Proyección sugerida")}
-                  value={formatCurrency(engineSnapshot?.simulation?.suggestedProjectedValue, localeTag)}
-                  hint={formatPercent(engineSnapshot?.simulation?.suggestedExpectedReturn, localeTag)}
+                  label={L("Evidence gaps", "Brechas de evidencia")}
+                  value={(engineSnapshot?.documentReadiness ?? []).filter((row: any) => !row.ready).length}
+                  hint={L("Missing required documents", "Documentos requeridos pendientes")}
                 />
                 <Readout
-                  label={L("Expected delta", "Delta esperado")}
-                  value={formatPercent(engineSnapshot?.simulation?.expectedReturnDelta, localeTag)}
-                  hint={`${engineSnapshot?.simulation?.horizonYears ?? 5} yrs`}
+                  label={L("Risk flags", "Alertas de riesgo")}
+                  value={engineSnapshot?.riskFlags?.length ?? 0}
+                  hint={L("Human review context", "Contexto para revisión humana")}
                 />
               </div>
             </div>
+
+            <p className="mt-3 text-xs leading-5 text-slate-500">
+              {L(
+                "Valuation posture and evidence only. This engine does not generate target weights, position deltas, price predictions, or trade actions.",
+                "Solo postura de valoración y evidencia. Este motor no genera pesos objetivo, deltas de posición, predicciones de precio ni acciones de trading."
+              )}
+            </p>
 
             <div className="mt-5 overflow-x-auto rounded-lg border border-slate-800">
               <table className="w-full min-w-[760px] text-left text-sm">
                 <thead className="bg-slate-950/55 text-xs text-slate-500">
                   <tr>
                     <th className="px-3 py-2">{L("Ticker", "Símbolo")}</th>
-                    <th className="px-3 py-2">{L("Verdict", "Veredicto")}</th>
+                    <th className="px-3 py-2">{L("Valuation posture", "Postura de valoración")}</th>
                     <th className="px-3 py-2">{L("Current weight", "Peso actual")}</th>
-                    <th className="px-3 py-2">{L("Target weight", "Peso sugerido")}</th>
-                    <th className="px-3 py-2">{L("Position delta", "Delta posición")}</th>
+                    <th className="px-3 py-2">{L("Modeled margin of safety", "Margen de seguridad modelado")}</th>
+                    <th className="px-3 py-2">{L("Evidence", "Evidencia")}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(engineSnapshot?.allocation ?? []).map((row: any) => (
-                    <tr key={row.ticker} className="border-t border-slate-800">
-                      <td className="px-3 py-2 font-semibold text-slate-100">{row.ticker}</td>
-                      <td className="px-3 py-2 text-slate-300">{String(row.verdict ?? "-")}</td>
-                      <td className="px-3 py-2 text-slate-300">{formatPercent(row.currentWeight, localeTag)}</td>
-                      <td className="px-3 py-2 text-slate-300">{formatPercent(row.targetWeight, localeTag)}</td>
-                      <td className={`px-3 py-2 font-semibold ${Number(row.deltaValue) >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
-                        {formatCurrency(row.deltaValue, localeTag)}
+                  {(engineSnapshot?.positions ?? []).map((position: any) => (
+                    <tr key={position.ticker} className="border-t border-slate-800">
+                      <td className="px-3 py-2 font-semibold text-slate-100">{position.ticker}</td>
+                      <td className="px-3 py-2 text-slate-300">{String(position.derived?.verdict ?? "-").replaceAll("_", " ")}</td>
+                      <td className="px-3 py-2 text-slate-300">{formatPercent(position.weight, localeTag)}</td>
+                      <td className="px-3 py-2 text-slate-300">{formatPercent(position.derived?.marginOfSafety, localeTag)}</td>
+                      <td className="px-3 py-2 text-slate-300">
+                        {position.documentReadiness?.ready ? L("Ready", "Lista") : L("Incomplete", "Incompleta")}
                       </td>
                     </tr>
                   ))}

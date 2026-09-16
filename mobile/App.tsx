@@ -27,6 +27,7 @@ import { NotebookWorkspaceScreen } from "./src/screens/NotebookWorkspaceScreen";
 import { NotebookEditorScreen } from "./src/screens/NotebookEditorScreen";
 import { BrokerConnectScreen } from "./src/screens/BrokerConnectScreen";
 import { BusinessPlanScreen } from "./src/screens/BusinessPlanScreen";
+import { DailyInvestmentOfficeScreen } from "./src/screens/DailyInvestmentOfficeScreen";
 import { AuthScreen } from "./src/screens/AuthScreen";
 import { ResetPasswordScreen } from "./src/screens/ResetPasswordScreen";
 import { ThemeProvider, useTheme } from "./src/lib/ThemeContext";
@@ -77,6 +78,7 @@ type RootStackParamList = {
   NotebookEditor: { kind: "page" | "free"; id: string; title?: string };
   BrokerConnect: undefined;
   BusinessPlan: undefined;
+  DailyInvestmentOffice: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -160,6 +162,15 @@ function MainTabs() {
     navigation.navigate("Notebook");
   }, [navigation]);
 
+  const openDailyInvestmentOffice = useCallback(() => {
+    const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
+    if (parent) {
+      parent.navigate("DailyInvestmentOffice");
+      return;
+    }
+    navigation.navigate("DailyInvestmentOffice");
+  }, [navigation]);
+
   return (
       <Tab.Navigator
         detachInactiveScreens
@@ -207,6 +218,7 @@ function MainTabs() {
               onOpenBusinessPlan={openBusinessPlan}
               onOpenNotebook={openNotebook}
               onOpenAICoach={() => navigation.navigate("Tabs", { screen: "AICoach" })}
+              onOpenDailyInvestmentOffice={openDailyInvestmentOffice}
             />
           )}
         </Tab.Screen>
@@ -1059,6 +1071,11 @@ function AppShell() {
             name="BusinessPlan"
             component={BusinessPlanScreen}
             options={{ title: "Trading Business Plan" }}
+          />
+          <Stack.Screen
+            name="DailyInvestmentOffice"
+            component={DailyInvestmentOfficeScreen}
+            options={{ title: t(language, "Investment Office", "Oficina de Inversiones") }}
           />
         </Stack.Navigator>
       )}

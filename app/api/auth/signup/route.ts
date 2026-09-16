@@ -6,9 +6,10 @@ import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import {
   CURRENT_PRIVACY_VERSION,
   CURRENT_TERMS_VERSION,
-  isCurrentLegalAcceptancePayload,
+  isCurrentSignupLegalAcceptancePayload,
 } from "@/lib/legalConsent";
 import { recordLegalAcceptance } from "@/lib/serverLegalAcceptance";
+import { requireRuntimeControl } from "@/lib/runtimeControls";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,9 @@ type Body = {
   legalAccepted?: boolean;
   termsVersion?: string;
   privacyVersion?: string;
+  termsReadAccepted?: boolean;
+  privacyReadAccepted?: boolean;
+  platformDisclosureAccepted?: boolean;
 };
 
 function splitFullName(fullName: string) {
@@ -38,6 +42,9 @@ function splitFullName(fullName: string) {
 }
 
 export async function POST(req: NextRequest) {
+  const runtimeGate = await requireRuntimeControl("signup");
+  if (runtimeGate) return runtimeGate;
+
   const rate = await rateLimit(`auth-signup:${getClientIp(req)}`, {
     limit: 8,
     windowMs: 10 * 60_000,
@@ -76,10 +83,11 @@ export async function POST(req: NextRequest) {
     if (passwordError) {
       return NextResponse.json({ error: passwordError }, { status: 400 });
     }
-    if (!isCurrentLegalAcceptancePayload(body)) {
+    if (!isCurrentSignupLegalAcceptancePayload(body)) {
       return NextResponse.json(
         {
-          error: "You must accept the current Terms & Conditions and Privacy Policy to create an account.",
+          error:
+            "You must accept the current Terms & Conditions, Privacy Policy, and educational-use disclosure to create an account.",
           termsVersion: CURRENT_TERMS_VERSION,
           privacyVersion: CURRENT_PRIVACY_VERSION,
         },
@@ -149,6 +157,9 @@ export async function POST(req: NextRequest) {
         metadata: {
           plan,
           signupSource: source,
+          termsReadAccepted: Boolean(body.termsReadAccepted),
+          privacyReadAccepted: Boolean(body.privacyReadAccepted),
+          platformDisclosureAccepted: Boolean(body.platformDisclosureAccepted),
         },
       });
     } catch (legalErr) {

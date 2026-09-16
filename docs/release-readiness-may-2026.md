@@ -76,7 +76,7 @@ Nota: el smoke k6 y el smoke e2e publico cubren paginas y redirecciones principa
 ### P2 - Puede ir despues del launch inicial
 
 1. Roadmap visual en pricing con items "Coming soon".
-   - Newsletter, Neuro Clubs, Neuro Store, Neuro Arena, importacion directa.
+   - Newsletter, Neuro Store, Neuro Arena, importacion directa.
    - Puede quedarse como roadmap si no promete disponibilidad inmediata.
 
 2. Partners.
@@ -135,7 +135,7 @@ Meta: congelar scope y probar los modulos principales.
 - Option Flow: paywall/beta, analyze, chat, outcome/post-mortem.
 - Import: CSV/order history, SnapTrade, Webull segun lo que se prometa publicamente.
 - Rules/alarms y notificaciones.
-- Forum/support/messages.
+- Support/messages.
 - Mobile iOS: auth, dashboard, calendar, journal, analytics, AI Coach, notebook, broker connect, reset password.
 - Bilingue: ES/EN en paginas publicas, signup, billing y modulos core.
 

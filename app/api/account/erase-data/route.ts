@@ -7,7 +7,7 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 export const runtime = "nodejs";
 
 const CONFIRMATION = "ERASE ALL DATA";
-const IGNORABLE_CODES = new Set(["42P01", "42703", "PGRST200", "PGRST204", "PGRST205"]);
+const IGNORABLE_CODES = new Set(["42P01", "42703", "42883", "PGRST200", "PGRST202", "PGRST204", "PGRST205"]);
 
 type DeleteResult = {
   table: string;
@@ -36,6 +36,15 @@ async function deleteByUser(table: string, userId: string, column = "user_id"): 
     throw error;
   }
   return { table, count: count ?? null };
+}
+
+async function deleteCapitalAccounts(userId: string): Promise<DeleteResult> {
+  const { data, error } = await supabaseAdmin.rpc("erase_neuro_capital_data", { p_user_id: userId });
+  if (error) {
+    if (isIgnorable(error)) return { table: "neuro_capital_data", count: null, skipped: true };
+    throw error;
+  }
+  return { table: "neuro_capital_data", count: Number(data ?? 0) };
 }
 
 async function deleteSupportStorage(userId: string) {
@@ -109,7 +118,7 @@ export async function POST(req: NextRequest) {
     }
 
     const storage = await deleteSupportStorage(userId);
-    const deletes: DeleteResult[] = [];
+    const deletes: DeleteResult[] = [await deleteCapitalAccounts(userId)];
 
     const tablesInDeleteOrder = [
       "support_messages",
@@ -120,6 +129,7 @@ export async function POST(req: NextRequest) {
       "ai_coach_memory",
       "option_flow_chat_messages",
       "option_flow_chat_sessions",
+      "option_flow_learning_runs",
       "option_flow_uploads",
       "option_flow_outcomes",
       "option_flow_reports",
@@ -127,6 +137,13 @@ export async function POST(req: NextRequest) {
       "neuro_analysis_jobs",
       "neuro_analysis_usage_events",
       "neuro_analysis_snapshots",
+      "neuro_analysis_position_exit_reviews",
+      "neuro_analysis_thesis_reviews",
+      "neuro_analysis_original_theses",
+      "neuro_analysis_committee_decisions",
+      "neuro_analysis_committee_packets",
+      "neuro_analysis_decisions",
+      "neuro_analysis_policies",
       "neuro_analysis_reports",
       "neuro_analysis_filings",
       "neuro_analysis_cases",

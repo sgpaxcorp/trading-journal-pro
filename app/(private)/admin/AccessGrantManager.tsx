@@ -13,7 +13,7 @@ type Notice = {
   text: string;
 } | null;
 
-const GROUP_ORDER = ["core", "performance", "tools", "community", "addons"] as const;
+const GROUP_ORDER = ["core", "performance", "tools", "addons"] as const;
 
 const GROUP_META = {
   core: {
@@ -27,10 +27,6 @@ const GROUP_META = {
   tools: {
     en: { title: "Tools", hint: "Execution utilities" },
     es: { title: "Herramientas", hint: "Utilidades de ejecución" },
-  },
-  community: {
-    en: { title: "Community", hint: "Social areas" },
-    es: { title: "Comunidad", hint: "Áreas sociales" },
   },
   addons: {
     en: { title: "Add-ons", hint: "Extra capabilities" },

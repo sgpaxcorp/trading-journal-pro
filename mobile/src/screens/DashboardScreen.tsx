@@ -29,6 +29,7 @@ type DashboardScreenProps = {
   onOpenBusinessPlan: () => void;
   onOpenNotebook: () => void;
   onOpenAICoach: () => void;
+  onOpenDailyInvestmentOffice: () => void;
 };
 
 const coachBrain = require("../../assets/neurotrader-logo-icon.png");
@@ -1053,7 +1054,13 @@ function mergeChecklistBaseWithSaved(baseTexts: string[], saved: UiChecklistItem
   return merged;
 }
 
-export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenNotebook, onOpenAICoach }: DashboardScreenProps) {
+export function DashboardScreen({
+  onOpenJournalDate,
+  onOpenBusinessPlan,
+  onOpenNotebook,
+  onOpenAICoach,
+  onOpenDailyInvestmentOffice,
+}: DashboardScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
   const user = useSupabaseUser();
@@ -2266,6 +2273,12 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
                 icon: "sparkles-outline" as const,
                 label: t(language, "AI Coach", "Coach IA"),
                 onPress: onOpenAICoach,
+              },
+              {
+                key: "investment-office",
+                icon: "briefcase-outline" as const,
+                label: t(language, "Investment Office", "Oficina de Inversiones"),
+                onPress: onOpenDailyInvestmentOffice,
               },
             ].map((action) => (
               <Pressable

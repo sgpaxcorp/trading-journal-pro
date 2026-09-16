@@ -5,6 +5,15 @@ import {
   type NeuroExternalProviderSnapshot,
   type NeuroExternalProviderStatus,
 } from "@/lib/neuroDataProviders";
+import {
+  createFinancialIntegrityManifest,
+  financialCalculation,
+  financialFact,
+  financialNumberOrNull,
+  financialTraceId,
+  type FinancialDataIntegrityManifest,
+  type FinancialTraceRecord,
+} from "@/lib/neuroFinancialDataIntegrity";
 
 export type NeuroMarketData = {
   source: string;
@@ -53,11 +62,32 @@ export type NeuroMarketData = {
   } | null;
   annualFundamentals: Array<{
     year: number;
+    asOfDate?: string | null;
+    reportingPeriod?: string | null;
+    publicationDate?: string | null;
+    sourceName?: string | null;
+    sourceDocument?: string | null;
+    currency?: string | null;
     totalRevenue?: number | null;
     operatingIncome?: number | null;
     netIncome?: number | null;
     operatingCashFlow?: number | null;
     freeCashFlow?: number | null;
+    capitalExpenditures?: number | null;
+    accountsReceivable?: number | null;
+    inventory?: number | null;
+    goodwillAndIntangibleAssets?: number | null;
+    stockBasedCompensation?: number | null;
+    dilutedAverageShares?: number | null;
+    deferredRevenue?: number | null;
+    deferredTaxAssets?: number | null;
+    deferredTaxLiabilities?: number | null;
+    netDeferredTaxes?: number | null;
+    changeInWorkingCapital?: number | null;
+    totalAssets?: number | null;
+    pretaxIncome?: number | null;
+    incomeTaxExpense?: number | null;
+    cashAndCashEquivalents?: number | null;
     dilutedEPS?: number | null;
     totalDebt?: number | null;
     stockholdersEquity?: number | null;
@@ -65,6 +95,12 @@ export type NeuroMarketData = {
     netMargin?: number | null;
     fcfMargin?: number | null;
     debtToEquity?: number | null;
+    goodwill?: number | null;
+    intangibleAssets?: number | null;
+    currentDeferredRevenue?: number | null;
+    nonCurrentDeferredRevenue?: number | null;
+    longTermDebt?: number | null;
+    currentDebt?: number | null;
   }>;
   priceHistory: Array<{ date: string; close: number }>;
   yearlyPrice: Array<{ year: number; firstClose: number; lastClose: number; returnPct?: number | null }>;
@@ -76,7 +112,9 @@ export type NeuroMarketData = {
     fundamentalsSource?: string | null;
     providerStatuses?: NeuroExternalProviderStatus[];
     messages?: string[];
+    fetchedAt?: string;
   };
+  financialDataIntegrity?: FinancialDataIntegrityManifest;
   errors?: Record<string, string | null>;
 };
 
@@ -103,6 +141,21 @@ const FUNDAMENTAL_TYPES = [
   "annualNetIncome",
   "annualOperatingCashFlow",
   "annualFreeCashFlow",
+  "annualCapitalExpenditure",
+  "annualAccountsReceivable",
+  "annualInventory",
+  "annualGoodwillAndOtherIntangibleAssets",
+  "annualStockBasedCompensation",
+  "annualDilutedAverageShares",
+  "annualCurrentDeferredRevenue",
+  "annualNonCurrentDeferredRevenue",
+  "annualDeferredTaxAssets",
+  "annualDeferredTaxLiabilities",
+  "annualChangeInWorkingCapital",
+  "annualTotalAssets",
+  "annualPretaxIncome",
+  "annualTaxProvision",
+  "annualCashCashEquivalentsAndShortTermInvestments",
   "annualDilutedEPS",
   "annualTotalDebt",
   "annualStockholdersEquity",
@@ -124,8 +177,7 @@ function rawNumber(value: any) {
     if (!Number.isFinite(parsed)) return null;
     return trimmed.endsWith("%") ? parsed / 100 : parsed;
   }
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : null;
+  return financialNumberOrNull(raw);
 }
 
 async function fetchJson(
@@ -186,6 +238,18 @@ function buildAnnualRows(timeseries: any) {
   return Array.from(rows.values())
     .map((row) => ({
       ...row,
+      capitalExpenditures: row.capitalExpenditure == null ? null : Math.abs(row.capitalExpenditure),
+      goodwillAndIntangibleAssets: row.goodwillAndOtherIntangibleAssets ?? null,
+      deferredRevenue:
+        row.currentDeferredRevenue != null && row.nonCurrentDeferredRevenue != null
+          ? row.currentDeferredRevenue + row.nonCurrentDeferredRevenue
+          : null,
+      netDeferredTaxes:
+        row.deferredTaxAssets != null && row.deferredTaxLiabilities != null
+          ? row.deferredTaxAssets - row.deferredTaxLiabilities
+          : null,
+      incomeTaxExpense: row.taxProvision ?? null,
+      cashAndCashEquivalents: row.cashCashEquivalentsAndShortTermInvestments ?? null,
       operatingMargin:
         row.totalRevenue && row.operatingIncome != null ? row.operatingIncome / row.totalRevenue : null,
       netMargin: row.totalRevenue && row.netIncome != null ? row.netIncome / row.totalRevenue : null,
@@ -454,11 +518,48 @@ function instantFactMap(rows: any[]) {
 }
 
 function buildSecAnnualRows(companyFacts: any) {
+  const metadataByYear = new Map<number, { filed: string | null; end: string | null; form: string | null; accn: string | null }>();
+  for (const namespace of Object.values(companyFacts?.facts ?? {}) as any[]) {
+    for (const concept of Object.values(namespace ?? {}) as any[]) {
+      for (const rows of Object.values(concept?.units ?? {}) as any[]) {
+        if (!Array.isArray(rows)) continue;
+        for (const row of rows) {
+          const form = String(row?.form ?? "");
+          const year = Number(row?.fy ?? String(row?.end ?? "").slice(0, 4));
+          if (!year || !["10-K", "20-F", "40-F"].includes(form)) continue;
+          const filed = String(row?.filed ?? "") || null;
+          const existing = metadataByYear.get(year);
+          if (!existing || String(filed ?? "") >= String(existing.filed ?? "")) {
+            metadataByYear.set(year, {
+              filed,
+              end: String(row?.end ?? "") || null,
+              form,
+              accn: String(row?.accn ?? "") || null,
+            });
+          }
+        }
+      }
+    }
+  }
   const revenue = annualFactMap(
     factUnits(companyFacts, "us-gaap", ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet"], ["USD"])
   );
   const operatingIncome = annualFactMap(factUnits(companyFacts, "us-gaap", ["OperatingIncomeLoss"], ["USD"]));
   const netIncome = annualFactMap(factUnits(companyFacts, "us-gaap", ["NetIncomeLoss", "ProfitLoss"], ["USD"]));
+  const pretaxIncome = annualFactMap(
+    factUnits(
+      companyFacts,
+      "us-gaap",
+      [
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+      ],
+      ["USD"]
+    )
+  );
+  const incomeTaxExpense = annualFactMap(
+    factUnits(companyFacts, "us-gaap", ["IncomeTaxExpenseBenefit"], ["USD"])
+  );
   const operatingCashFlow = annualFactMap(
     factUnits(companyFacts, "us-gaap", ["NetCashProvidedByUsedInOperatingActivities"], ["USD"])
   );
@@ -471,6 +572,44 @@ function buildSecAnnualRows(companyFacts: any) {
     )
   );
   const dilutedEPS = annualFactMap(factUnits(companyFacts, "us-gaap", ["EarningsPerShareDiluted"], ["USD/shares"]));
+  const accountsReceivable = instantFactMap(
+    factUnits(companyFacts, "us-gaap", ["AccountsReceivableNetCurrent", "AccountsNotesAndLoansReceivableNetCurrent"], ["USD"])
+  );
+  const inventory = instantFactMap(factUnits(companyFacts, "us-gaap", ["InventoryNet"], ["USD"]));
+  const goodwill = instantFactMap(factUnits(companyFacts, "us-gaap", ["Goodwill"], ["USD"]));
+  const intangibleAssets = instantFactMap(
+    factUnits(companyFacts, "us-gaap", ["IntangibleAssetsNetExcludingGoodwill"], ["USD"])
+  );
+  const stockBasedCompensation = annualFactMap(
+    factUnits(companyFacts, "us-gaap", ["ShareBasedCompensation"], ["USD"])
+  );
+  const dilutedAverageShares = annualFactMap(
+    factUnits(companyFacts, "us-gaap", ["WeightedAverageNumberOfDilutedSharesOutstanding"], ["shares"])
+  );
+  const deferredRevenueCurrent = instantFactMap(
+    factUnits(companyFacts, "us-gaap", ["ContractWithCustomerLiabilityCurrent", "DeferredRevenueCurrent"], ["USD"])
+  );
+  const deferredRevenueNoncurrent = instantFactMap(
+    factUnits(companyFacts, "us-gaap", ["ContractWithCustomerLiabilityNoncurrent", "DeferredRevenueNoncurrent"], ["USD"])
+  );
+  const deferredTaxAssets = instantFactMap(
+    factUnits(companyFacts, "us-gaap", ["DeferredTaxAssetsNet", "DeferredTaxAssetsOther"], ["USD"])
+  );
+  const deferredTaxLiabilities = instantFactMap(
+    factUnits(companyFacts, "us-gaap", ["DeferredTaxLiabilitiesNoncurrent", "DeferredTaxLiabilities"], ["USD"])
+  );
+  const changeInWorkingCapital = annualFactMap(
+    factUnits(companyFacts, "us-gaap", ["IncreaseDecreaseInOperatingAssetsAndLiabilities", "IncreaseDecreaseInOperatingCapital"], ["USD"])
+  );
+  const totalAssets = instantFactMap(factUnits(companyFacts, "us-gaap", ["Assets"], ["USD"]));
+  const cashAndCashEquivalents = instantFactMap(
+    factUnits(
+      companyFacts,
+      "us-gaap",
+      ["CashCashEquivalentsAndShortTermInvestments", "CashAndCashEquivalentsAtCarryingValue"],
+      ["USD"]
+    )
+  );
   const stockholdersEquity = instantFactMap(
     factUnits(
       companyFacts,
@@ -499,6 +638,13 @@ function buildSecAnnualRows(companyFacts: any) {
         ...Object.keys(netIncome),
         ...Object.keys(operatingCashFlow),
         ...Object.keys(stockholdersEquity),
+        ...Object.keys(accountsReceivable),
+        ...Object.keys(inventory),
+        ...Object.keys(goodwill),
+        ...Object.keys(stockBasedCompensation),
+        ...Object.keys(pretaxIncome),
+        ...Object.keys(incomeTaxExpense),
+        ...Object.keys(cashAndCashEquivalents),
       ].map(Number)
     )
   )
@@ -507,23 +653,62 @@ function buildSecAnnualRows(companyFacts: any) {
     .slice(-10);
 
   return years.map((year) => {
+    const metadata = metadataByYear.get(year);
     const totalRevenue = revenue[year] ?? null;
     const cashFlow = operatingCashFlow[year] ?? null;
     const capexValue = capex[year] ?? null;
-    const freeCashFlow = cashFlow != null ? cashFlow - Math.abs(capexValue ?? 0) : null;
+    const freeCashFlow = cashFlow != null && capexValue != null ? cashFlow - Math.abs(capexValue) : null;
     const totalDebt =
-      longTermDebt[year] != null || currentDebt[year] != null
-        ? (longTermDebt[year] ?? 0) + (currentDebt[year] ?? 0)
+      longTermDebt[year] != null && currentDebt[year] != null
+        ? longTermDebt[year] + currentDebt[year]
         : null;
     return {
       year,
+      asOfDate: metadata?.end ?? null,
+      reportingPeriod: metadata?.end ?? `FY ${year}`,
+      publicationDate: metadata?.filed ?? null,
+      sourceName: "SEC company facts",
+      sourceDocument: metadata?.form
+        ? `${metadata.form}${metadata.accn ? ` ${metadata.accn}` : ""}`
+        : "Annual company filing",
+      currency: "USD",
       totalRevenue,
       operatingIncome: operatingIncome[year] ?? null,
       netIncome: netIncome[year] ?? null,
       operatingCashFlow: cashFlow,
       freeCashFlow,
+      capitalExpenditures: capexValue == null ? null : Math.abs(capexValue),
+      accountsReceivable: accountsReceivable[year] ?? null,
+      inventory: inventory[year] ?? null,
+      goodwillAndIntangibleAssets:
+        goodwill[year] != null && intangibleAssets[year] != null
+          ? goodwill[year] + intangibleAssets[year]
+          : null,
+      goodwill: goodwill[year] ?? null,
+      intangibleAssets: intangibleAssets[year] ?? null,
+      stockBasedCompensation: stockBasedCompensation[year] ?? null,
+      dilutedAverageShares: dilutedAverageShares[year] ?? null,
+      deferredRevenue:
+        deferredRevenueCurrent[year] != null && deferredRevenueNoncurrent[year] != null
+          ? deferredRevenueCurrent[year] + deferredRevenueNoncurrent[year]
+          : null,
+      currentDeferredRevenue: deferredRevenueCurrent[year] ?? null,
+      nonCurrentDeferredRevenue: deferredRevenueNoncurrent[year] ?? null,
+      deferredTaxAssets: deferredTaxAssets[year] ?? null,
+      deferredTaxLiabilities: deferredTaxLiabilities[year] ?? null,
+      netDeferredTaxes:
+        deferredTaxAssets[year] != null && deferredTaxLiabilities[year] != null
+          ? deferredTaxAssets[year] - deferredTaxLiabilities[year]
+          : null,
+      changeInWorkingCapital: changeInWorkingCapital[year] ?? null,
+      totalAssets: totalAssets[year] ?? null,
+      pretaxIncome: pretaxIncome[year] ?? null,
+      incomeTaxExpense: incomeTaxExpense[year] ?? null,
+      cashAndCashEquivalents: cashAndCashEquivalents[year] ?? null,
       dilutedEPS: dilutedEPS[year] ?? null,
       totalDebt,
+      longTermDebt: longTermDebt[year] ?? null,
+      currentDebt: currentDebt[year] ?? null,
       stockholdersEquity: stockholdersEquity[year] ?? null,
       operatingMargin:
         totalRevenue && operatingIncome[year] != null ? operatingIncome[year] / totalRevenue : null,
@@ -630,9 +815,174 @@ function mergeFundProfiles(
   return Object.keys(merged).length ? merged : null;
 }
 
+const MARKET_FINANCIAL_FIELDS = [
+  ["regularMarketPrice", "Current market price", "currency/share"],
+  ["fiftyTwoWeekHigh", "52-week high", "currency/share"],
+  ["fiftyTwoWeekLow", "52-week low", "currency/share"],
+  ["regularMarketVolume", "Current market volume", "shares"],
+  ["previousClose", "Previous close", "currency/share"],
+  ["marketCap", "Market capitalization", "currency"],
+  ["trailingPE", "Trailing price-to-earnings", "ratio"],
+  ["forwardPE", "Forward price-to-earnings", "ratio"],
+  ["priceToBook", "Price-to-book", "ratio"],
+  ["dividendYield", "Dividend yield", "decimal ratio"],
+] as const;
+
+const FUND_FINANCIAL_FIELDS = [
+  ["annualReportExpenseRatio", "Annual expense ratio", "decimal ratio"],
+  ["netAssets", "Fund net assets", "currency"],
+  ["yield", "Fund yield", "decimal ratio"],
+  ["ytdReturn", "Year-to-date return", "decimal ratio"],
+  ["threeYearAverageReturn", "Three-year average return", "decimal ratio"],
+  ["fiveYearAverageReturn", "Five-year average return", "decimal ratio"],
+  ["beta3Year", "Three-year beta", "ratio"],
+] as const;
+
+const FUNDAMENTAL_FIELDS = [
+  "totalRevenue", "operatingIncome", "netIncome", "operatingCashFlow", "freeCashFlow",
+  "capitalExpenditures", "accountsReceivable", "inventory", "goodwillAndIntangibleAssets",
+  "stockBasedCompensation", "dilutedAverageShares", "deferredRevenue", "deferredTaxAssets",
+  "deferredTaxLiabilities", "netDeferredTaxes", "changeInWorkingCapital", "totalAssets",
+  "pretaxIncome", "incomeTaxExpense", "cashAndCashEquivalents", "dilutedEPS", "totalDebt",
+  "stockholdersEquity", "operatingMargin", "netMargin", "fcfMargin", "debtToEquity",
+] as const;
+
+function fundamentalUnits(field: string) {
+  if (["operatingMargin", "netMargin", "fcfMargin", "debtToEquity"].includes(field)) {
+    return { currency: "N/A", units: "decimal ratio" };
+  }
+  if (field === "dilutedAverageShares") return { currency: "N/A", units: "shares" };
+  if (field === "dilutedEPS") return { currency: "USD", units: "currency/share" };
+  return { currency: "USD", units: "currency" };
+}
+
+function derivedFundamentalTrace(input: {
+  ticker: string;
+  row: any;
+  index: number;
+  field: string;
+  generatedAt: string;
+}): FinancialTraceRecord | null {
+  const path = `annualFundamentals.${input.index}.${input.field}`;
+  const idFor = (field: string) => financialTraceId(input.ticker, `annualFundamentals.${input.index}.${field}`);
+  const definitions: Record<string, { formula: string; inputs: string[] }> = {
+    freeCashFlow: { formula: "operatingCashFlow - abs(capitalExpenditures)", inputs: ["operatingCashFlow", "capitalExpenditures"] },
+    goodwillAndIntangibleAssets: { formula: "goodwill + intangibleAssets", inputs: ["goodwill", "intangibleAssets"] },
+    deferredRevenue: { formula: "currentDeferredRevenue + nonCurrentDeferredRevenue", inputs: ["currentDeferredRevenue", "nonCurrentDeferredRevenue"] },
+    netDeferredTaxes: { formula: "deferredTaxAssets - deferredTaxLiabilities", inputs: ["deferredTaxAssets", "deferredTaxLiabilities"] },
+    totalDebt: { formula: "longTermDebt + currentDebt", inputs: ["longTermDebt", "currentDebt"] },
+    operatingMargin: { formula: "operatingIncome / totalRevenue", inputs: ["operatingIncome", "totalRevenue"] },
+    netMargin: { formula: "netIncome / totalRevenue", inputs: ["netIncome", "totalRevenue"] },
+    fcfMargin: { formula: "freeCashFlow / totalRevenue", inputs: ["freeCashFlow", "totalRevenue"] },
+    debtToEquity: { formula: "totalDebt / stockholdersEquity", inputs: ["totalDebt", "stockholdersEquity"] },
+  };
+  const definition = definitions[input.field];
+  if (!definition) return null;
+  const { currency, units } = fundamentalUnits(input.field);
+  return financialCalculation({
+    id: idFor(input.field),
+    path,
+    label: `${input.field} ${input.row.year}`,
+    value: input.row[input.field],
+    formula: definition.formula,
+    inputs: definition.inputs.map((name) => ({
+      name,
+      value: financialNumberOrNull(input.row[name]),
+      traceId: idFor(name),
+    })),
+    calculationTimestamp: input.generatedAt,
+    reportingPeriod: input.row.reportingPeriod ?? input.row.asOfDate ?? `FY ${input.row.year}`,
+    currency,
+    units,
+    document: "Deterministic annual-fundamentals calculations",
+  });
+}
+
+export function buildMarketFinancialDataIntegrity(
+  item: Omit<NeuroMarketData, "financialDataIntegrity">,
+  generatedAt = new Date().toISOString()
+) {
+  const records: FinancialTraceRecord[] = [];
+  const ticker = sanitizeNeuroTicker(item.ticker) || "UNKNOWN";
+  const marketCurrency = String(item.company?.currency ?? "").toUpperCase();
+  const marketSource = item.source || "Market data service";
+  const marketDocument = `${ticker} market quote snapshot`;
+  for (const [field, label, unitType] of MARKET_FINANCIAL_FIELDS) {
+    const isCurrency = unitType.startsWith("currency");
+    records.push(financialFact({
+      id: financialTraceId(ticker, `market.${field}`),
+      path: `market.${field}`,
+      label,
+      value: item.market?.[field],
+      source: marketSource,
+      document: marketDocument,
+      reportingPeriod: generatedAt,
+      publicationDate: generatedAt,
+      currency: isCurrency ? marketCurrency : "N/A",
+      units: isCurrency ? unitType.replace("currency", marketCurrency || "currency") : unitType,
+      unavailableReason: `${label} or its currency could not be verified.`,
+    }));
+  }
+
+  for (const [field, label, units] of FUND_FINANCIAL_FIELDS) {
+    records.push(financialFact({
+      id: financialTraceId(ticker, `fund.${field}`),
+      path: `fund.${field}`,
+      label,
+      value: item.fund?.[field],
+      source: marketSource,
+      document: `${ticker} fund profile snapshot`,
+      reportingPeriod: generatedAt,
+      publicationDate: generatedAt,
+      currency: units === "currency" ? marketCurrency : "N/A",
+      units: units === "currency" ? marketCurrency || "currency" : units,
+    }));
+  }
+
+  item.annualFundamentals.forEach((row: any, index) => {
+    for (const field of FUNDAMENTAL_FIELDS) {
+      const derived = derivedFundamentalTrace({ ticker, row, index, field, generatedAt });
+      if (derived) {
+        records.push(derived);
+        continue;
+      }
+      const { currency, units } = fundamentalUnits(field);
+      records.push(financialFact({
+        id: financialTraceId(ticker, `annualFundamentals.${index}.${field}`),
+        path: `annualFundamentals.${index}.${field}`,
+        label: `${field} ${row.year}`,
+        value: row[field],
+        source: row.sourceName ?? item.dataQuality?.fundamentalsSource ?? marketSource,
+        document: row.sourceDocument ?? `${ticker} annual fundamentals snapshot`,
+        reportingPeriod: row.reportingPeriod ?? row.asOfDate ?? `FY ${row.year}`,
+        publicationDate: row.publicationDate ?? generatedAt,
+        currency: currency === "USD" ? row.currency ?? marketCurrency : currency,
+        units: units === "currency" ? row.currency ?? marketCurrency : units,
+      }));
+    }
+  });
+
+  item.priceHistory.forEach((row, index) => {
+    records.push(financialFact({
+      id: financialTraceId(ticker, `priceHistory.${index}.close`),
+      path: `priceHistory.${index}.close`,
+      label: `${ticker} closing price ${row.date}`,
+      value: row.close,
+      source: marketSource,
+      document: `${ticker} historical price snapshot`,
+      reportingPeriod: row.date,
+      publicationDate: generatedAt,
+      currency: marketCurrency,
+      units: `${marketCurrency || "currency"}/share`,
+    }));
+  });
+  return createFinancialIntegrityManifest(records, generatedAt);
+}
+
 export async function fetchNeuroMarketData(tickerInput: string): Promise<NeuroMarketData> {
   const ticker = sanitizeNeuroTicker(tickerInput);
   if (!ticker) throw new Error("Ticker is required.");
+  const fetchedAt = new Date().toISOString();
 
   const now = Math.floor(Date.now() / 1000);
   const tenYearsAgo = now - 60 * 60 * 24 * 365 * 10;
@@ -755,7 +1105,29 @@ export async function fetchNeuroMarketData(tickerInput: string): Promise<NeuroMa
     externalProviderError ? "One or more configured external market-data providers could not return data." : null,
   ].filter(Boolean) as string[];
 
-  return {
+  annualFundamentals = annualFundamentals.map((row) => ({
+    ...row,
+    asOfDate: row.asOfDate ?? `${row.year}-12-31`,
+    reportingPeriod: row.reportingPeriod ?? `FY ${row.year}`,
+    publicationDate: row.publicationDate ?? fetchedAt,
+    sourceName:
+      row.sourceName ??
+      (fundamentalsSource === "sec" ? "SEC company facts" : "Market data service"),
+    sourceDocument:
+      row.sourceDocument ??
+      (fundamentalsSource === "sec"
+        ? `${ticker} annual company filing`
+        : `${ticker} annual fundamentals snapshot`),
+    currency:
+      row.currency ??
+      chartResult?.meta?.currency ??
+      quoteRow?.currency ??
+      externalCompany?.currency ??
+      nasdaqFallback?.company?.currency ??
+      null,
+  }));
+
+  const result: Omit<NeuroMarketData, "financialDataIntegrity"> = {
     source: fallbackMessages.length ? "Market Data (multi-source degraded)" : "Market Data (multi-source)",
     ticker,
     instrumentType,
@@ -824,6 +1196,7 @@ export async function fetchNeuroMarketData(tickerInput: string): Promise<NeuroMa
       fundamentalsSource,
       providerStatuses: external.statuses,
       messages: fallbackMessages,
+      fetchedAt,
     },
     errors: {
       search: search?.error ?? null,
@@ -835,6 +1208,10 @@ export async function fetchNeuroMarketData(tickerInput: string): Promise<NeuroMa
       nasdaq: nasdaqError,
       sec: secError,
     },
+  };
+  return {
+    ...result,
+    financialDataIntegrity: buildMarketFinancialDataIntegrity(result, fetchedAt),
   };
 }
 

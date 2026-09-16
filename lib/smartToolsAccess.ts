@@ -14,7 +14,8 @@ function splitEmailList(value?: string | null) {
 
 function ownerEmails() {
   const explicitOwners = splitEmailList(process.env.SMART_TOOLS_OWNER_EMAILS);
-  return explicitOwners.length ? explicitOwners : splitEmailList(process.env.ADMIN_EMAILS);
+  const adminEmails = splitEmailList(process.env.ADMIN_EMAILS);
+  return [...new Set([...explicitOwners, ...adminEmails])];
 }
 
 async function getUserEmail(userId: string) {
@@ -30,10 +31,13 @@ export async function isSmartToolsOwner(auth: AuthLike) {
   if (!userId && !email) return false;
 
   const allowList = ownerEmails();
-  if (!allowList.length) return false;
   if (email && allowList.includes(email)) return true;
 
   if (userId) {
+    const { isAdminAccount } = await import("@/lib/adminAuth");
+    if (await isAdminAccount(userId, email || null)) return true;
+
+    if (!allowList.length) return false;
     const fetchedEmail = String((await getUserEmail(userId)) ?? "").trim().toLowerCase();
     return Boolean(fetchedEmail && allowList.includes(fetchedEmail));
   }

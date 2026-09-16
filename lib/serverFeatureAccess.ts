@@ -7,7 +7,9 @@ import {
   brokerConnectionsUnavailableMessage,
   isEnabledEnvValue,
 } from "@/lib/brokerConnections";
-import { planFromEntitlements, planFromProfile, type AppPlan } from "@/lib/planAccess";
+import { planFromEntitlements, type AppPlan } from "@/lib/planAccess";
+import { requireRuntimeControl } from "@/lib/runtimeControls";
+import { requireBrokerConnectivityAccess } from "@/lib/emergencyPortfolioControls";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 type ServerEntitlement = {
@@ -49,15 +51,8 @@ export async function listActiveUserEntitlements(userId: string): Promise<Server
 export async function getServerPlanForUser(userId: string): Promise<AppPlan> {
   if (!userId) return "none";
 
-  const [entitlements, profileResult] = await Promise.all([
-    listActiveUserEntitlements(userId),
-    supabaseAdmin.from("profiles").select("plan, subscription_status").eq("id", userId).maybeSingle(),
-  ]);
-
-  const entitlementPlan = planFromEntitlements(entitlements);
-  if (entitlementPlan !== "none") return entitlementPlan;
-
-  return planFromProfile(profileResult.data as any);
+  const entitlements = await listActiveUserEntitlements(userId);
+  return planFromEntitlements(entitlements);
 }
 
 export async function hasServerEntitlement(userId: string, entitlementKey: string): Promise<boolean> {
@@ -105,6 +100,12 @@ export function brokerConnectionsDisabledResponse() {
 }
 
 export async function requireBrokerSyncAccess(userId: string) {
+  const emergencyGate = await requireBrokerConnectivityAccess();
+  if (emergencyGate) return emergencyGate;
+
+  const runtimeGate = await requireRuntimeControl("broker_connections");
+  if (runtimeGate) return runtimeGate;
+
   if (!areBrokerConnectionsEnabledFromEnv()) {
     return brokerConnectionsDisabledResponse();
   }
