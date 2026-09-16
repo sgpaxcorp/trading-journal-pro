@@ -126,6 +126,34 @@ describe("dashboard coach plan freshness", () => {
     expect(normalized.actionPlan.whatISee).toContain("-$35.00");
     expect(normalized.actionPlan.whatISee).toContain("no respetado");
     expect(normalized.referencedDates).toContain("2026-09-14");
+    expect(normalized.actionPlan.neuroPattern).toContain("Data insuficiente");
+    expect(dashboardCoachSourceSignature(source)).toMatch(/^v3-/);
+  });
+
+  it("preserves structured Neuro coaching returned by the AI", () => {
+    const source = buildDashboardCoachSource({
+      account,
+      plan,
+      asOfDate: "2026-09-16",
+      entries: [{ date: "2026-09-16", pnl: 25, respected_plan: true }],
+    });
+    const normalized = normalizeDashboardCoachPlan({
+      source,
+      sourceSignature: "signature",
+      language: "en",
+      raw: {
+        neuroPattern: "Urgency is shortening confirmation.",
+        neuroEvidence: "2 of 3 sessions: 2026-09-16 and 2026-09-14.",
+        neuroAction: "Pause 60 seconds and name the confirmation before entry.",
+        neuroSuccessCheck: "Next 3 sessions contain no entered-early tag.",
+        referencedDates: ["2026-09-16", "2026-09-14"],
+      },
+    });
+
+    expect(normalized.actionPlan.neuroPattern).toContain("Urgency");
+    expect(normalized.actionPlan.neuroEvidence).toContain("2 of 3");
+    expect(normalized.actionPlan.neuroAction).toContain("60 seconds");
+    expect(normalized.actionPlan.neuroSuccessCheck).toContain("Next 3 sessions");
   });
 });
 

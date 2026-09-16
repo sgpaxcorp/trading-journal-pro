@@ -13,6 +13,7 @@ type ModelPricing = {
 };
 
 const MODEL_PRICING_USD_PER_MILLION: Record<string, ModelPricing> = {
+  "gpt-6-astra": { input: 10, cachedInput: 1, output: 50 },
   "gpt-5.6-sol": { input: 4, cachedInput: 0.4, output: 20 },
   "gpt-5.6-terra": { input: 2, cachedInput: 0.2, output: 12 },
   "gpt-5.6-luna": { input: 0.2, cachedInput: 0.02, output: 1.2 },
@@ -98,7 +99,7 @@ export function estimateAiUsageCost(params: {
       cachedInput: pricing?.cachedInput ?? null,
       output: pricing?.output ?? null,
       fileSearchCallUsd: FILE_SEARCH_CALL_USD,
-      sourceVersion: "2026-09-03",
+      sourceVersion: "2026-09-16",
     },
   };
 }

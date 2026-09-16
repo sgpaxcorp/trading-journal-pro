@@ -8,6 +8,7 @@ import {
 
 const FETCH_TIMEOUT_MS = 8_000;
 const MAX_CANDLES = 5_000;
+const MAX_OPTION_CANDLES = 10_000;
 
 const SYMBOL_MAP: Record<string, string> = {
   SPX: "^SPX",
@@ -25,6 +26,11 @@ const SYMBOL_MAP: Record<string, string> = {
 export function optionFlowYahooSymbol(value: string) {
   const normalized = value.trim().toUpperCase().replace(/[^A-Z0-9.^=-]/g, "").slice(0, 24);
   return SYMBOL_MAP[normalized] ?? normalized;
+}
+
+export function optionFlowYahooContractSymbol(value: string) {
+  const normalized = value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return /^[A-Z]{1,8}\d{6}[CP]\d{8}$/.test(normalized) ? normalized : "";
 }
 
 export async function fetchOptionFlowIntradayCandles(input: {
@@ -94,6 +100,72 @@ export async function fetchOptionFlowIntradayCandles(input: {
           Number.isFinite(candle.close)
       )
       .slice(-MAX_CANDLES);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function fetchOptionFlowContractCandles(input: {
+  contract: string;
+  startDate: string;
+  endDate: string;
+}): Promise<OptionFlowCandle[]> {
+  const symbol = optionFlowYahooContractSymbol(input.contract);
+  if (!symbol) return [];
+  const period1 = Math.floor(zonedDateTimeToUtc(input.startDate, 0).getTime() / 1000);
+  const period2 = Math.floor(
+    zonedDateTimeToUtc(addCalendarDays(input.endDate, 1), 0).getTime() / 1000
+  );
+  if (!Number.isFinite(period1) || !Number.isFinite(period2) || period2 <= period1) return [];
+
+  const query = new URLSearchParams({
+    interval: "1m",
+    period1: String(period1),
+    period2: String(period2),
+    includePrePost: "false",
+    events: "history",
+  });
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?${query}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json,text/plain,*/*",
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) return [];
+    const json = await response.json();
+    const result = json?.chart?.result?.[0];
+    const timestamps: number[] = Array.isArray(result?.timestamp) ? result.timestamp : [];
+    const quote = result?.indicators?.quote?.[0] ?? {};
+    const opens: unknown[] = Array.isArray(quote.open) ? quote.open : [];
+    const highs: unknown[] = Array.isArray(quote.high) ? quote.high : [];
+    const lows: unknown[] = Array.isArray(quote.low) ? quote.low : [];
+    const closes: unknown[] = Array.isArray(quote.close) ? quote.close : [];
+    return timestamps
+      .map((timestamp, index) => ({
+        time: Number(timestamp) * 1000,
+        open: Number(opens[index]),
+        high: Number(highs[index]),
+        low: Number(lows[index]),
+        close: Number(closes[index]),
+      }))
+      .filter(
+        (candle) =>
+          Number.isFinite(candle.time) &&
+          Number.isFinite(candle.open) &&
+          Number.isFinite(candle.high) &&
+          Number.isFinite(candle.low) &&
+          Number.isFinite(candle.close)
+      )
+      .slice(-MAX_OPTION_CANDLES);
+  } catch {
+    return [];
   } finally {
     clearTimeout(timer);
   }

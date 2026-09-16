@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { buildAnnualMotivationMessage } from "@/lib/annualMotivation";
+import {
+  buildAnnualMotivationMessage,
+  buildDailyPushMotivationMessage,
+} from "@/lib/annualMotivation";
 import { requireCronSecret } from "@/lib/cronAuth";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
@@ -264,6 +267,10 @@ async function handleRequest(req: NextRequest) {
       ["en", englishMessage],
       ["es", spanishMessage],
     ]);
+    const pushMessageByLocale = new Map([
+      ["en", buildDailyPushMotivationMessage(deliveryDate, "en")],
+      ["es", buildDailyPushMotivationMessage(deliveryDate, "es")],
+    ]);
     const messages: Array<Record<string, unknown>> = [];
     const pendingPushDeliveries: Array<{ tokenId: string; userId: string; messageId: string }> = [];
     const inAppDeliveries: Array<{
@@ -278,6 +285,7 @@ async function handleRequest(req: NextRequest) {
     for (const row of rows) {
       const localeCode = String(row.locale || "en").toLowerCase().startsWith("es") ? "es" : "en";
       const motivation = messageByLocale.get(localeCode) || englishMessage;
+      const compactPush = pushMessageByLocale.get(localeCode) || pushMessageByLocale.get("en")!;
       const title = String(motivation.title || "Neuro Trader");
       const bodyText = String(motivation.body || "").trim();
       if (!bodyText) continue;
@@ -295,8 +303,8 @@ async function handleRequest(req: NextRequest) {
 
       messages.push({
         to: row.expo_push_token,
-        title,
-        body: bodyText,
+        title: compactPush.title,
+        body: compactPush.body,
         sound: "default",
         data: { screen: "Messages", type: "daily_motivation", category: "motivation", messageId: motivation.id },
       });

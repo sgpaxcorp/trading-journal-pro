@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { buildAnnualMotivationMessage } from "@/lib/annualMotivation";
+import { buildDailyPushMotivationMessage } from "@/lib/annualMotivation";
 import { requireCronSecret } from "@/lib/cronAuth";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
@@ -39,11 +39,9 @@ function getNewYorkTimeParts() {
   return { year, month, day, weekday, hour, minute };
 }
 
-function getNewYorkDayOfYear() {
+function getNewYorkDateString() {
   const { year, month, day } = getNewYorkTimeParts();
-  const startUtc = Date.UTC(year, 0, 1);
-  const currentUtc = Date.UTC(year, month - 1, day);
-  return Math.floor((currentUtc - startUtc) / 86400000) + 1;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function shouldSendNowNY() {
@@ -53,7 +51,7 @@ function shouldSendNowNY() {
 }
 
 function buildMessage(locale: string | null) {
-  return buildAnnualMotivationMessage(getNewYorkDayOfYear(), locale);
+  return buildDailyPushMotivationMessage(getNewYorkDateString(), locale);
 }
 
 async function sendExpoMessages(messages: Array<Record<string, unknown>>) {

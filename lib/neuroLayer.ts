@@ -43,6 +43,12 @@ export type NeuroMemory = {
   title: string;
   body: string;
   kind: "strength" | "risk" | "neutral";
+  evidence?: string;
+  nextAction?: string;
+  successCheck?: string;
+  sourceDates?: string[];
+  sampleSize?: number;
+  generatedBy?: "rules" | "ai";
 };
 
 export type NeuroMemorySession = {
@@ -435,79 +441,194 @@ export function buildNeuroMemory(
   const count = (predicate: (session: (typeof normalized)[number]) => boolean) =>
     normalized.reduce((acc, session) => acc + (predicate(session) ? 1 : 0), 0);
 
+  const datesFor = (predicate: (session: (typeof normalized)[number]) => boolean) =>
+    normalized.filter(predicate).map((session) => session.date).slice(0, 4);
+
+  const planDriftPredicate = (session: (typeof normalized)[number]) =>
+    session.neuro.inside.plan_followed === "no" ||
+    session.neuro.inside.plan_followed === "partial" ||
+    session.neuro.after.truth.includes("forced_trade") ||
+    session.neuro.after.truth.includes("broke_plan");
+
   const earlyUrgent = count(
     (session) =>
       session.neuro.inside.changed.includes("entered_early") ||
       session.neuro.inside.state.some((item) => item === "urgent" || item === "revenge_mode")
   );
-  const forcedTrades = count(
-    (session) =>
-      session.neuro.after.truth.includes("forced_trade") ||
-      session.neuro.after.truth.includes("broke_plan")
-  );
+  const planDrift = count(planDriftPredicate);
   const calmAligned = count(
     (session) =>
       session.neuro.inside.plan_followed === "yes" &&
-      session.neuro.inside.state.some((item) => item === "calm" || item === "patient" || item === "clear") &&
-      (session.pnl == null || session.pnl >= 0)
+      session.neuro.inside.state.some((item) => item === "calm" || item === "patient" || item === "clear")
   );
   const clearInvalidation = count(
     (session) => session.neuro.premarket.invalidation.length > 0 && session.neuro.inside.plan_followed === "yes"
   );
 
   const t = (en: string, es: string) => (lang === "es" ? es : en);
+  const evidenceLine = (countValue: number, dates: string[]) =>
+    t(
+      `${countValue} of ${normalized.length} reviewed sessions${dates.length ? ` (${dates.join(", ")})` : ""}.`,
+      `${countValue} de ${normalized.length} sesiones revisadas${dates.length ? ` (${dates.join(", ")})` : ""}.`
+    );
 
-  if (forcedTrades >= 2) {
+  if (planDrift >= 2) {
+    const sourceDates = datesFor(planDriftPredicate);
     return {
       title: t("Pattern to interrupt", "Patrón a interrumpir"),
       body: t(
-        `Forced-trade or broke-plan truth tags showed up in ${forcedTrades} of your last ${normalized.length} Neuro-tagged sessions. Interrupt the first impulsive decision.`,
-        `Los tags de trade forzado o romper el plan aparecieron en ${forcedTrades} de tus últimas ${normalized.length} sesiones con Neuro. Interrumpe la primera decisión impulsiva.`
+        "The recurring issue is not the market outcome; it is granting execution permission after the plan has already weakened.",
+        "El problema recurrente no es el resultado del mercado; es darte permiso de ejecutar después de que el plan ya perdió fuerza."
       ),
       kind: "risk",
+      evidence: `${evidenceLine(planDrift, sourceDates)} ${t("Plan-following was partial/no or the review identified a forced/broken-plan trade.", "El plan se siguió parcial/no o la revisión identificó un trade forzado o fuera del plan.")}`,
+      nextAction: t(
+        "Before the next entry, state the setup, invalidation, and dollar risk. If one is missing, the trade is not authorized.",
+        "Antes de la próxima entrada, declara setup, invalidación y riesgo en dólares. Si falta uno, el trade no está autorizado."
+      ),
+      successCheck: t(
+        "Next 3 sessions: zero forced-trade/broke-plan tags and plan-followed marked yes.",
+        "Próximas 3 sesiones: cero tags de trade forzado/plan roto y plan seguido marcado sí."
+      ),
+      sourceDates,
+      sampleSize: normalized.length,
+      generatedBy: "rules",
     };
   }
 
   if (earlyUrgent >= 2) {
+    const sourceDates = datesFor(
+      (session) =>
+        session.neuro.inside.changed.includes("entered_early") ||
+        session.neuro.inside.state.some((item) => item === "urgent" || item === "revenge_mode")
+    );
     return {
       title: t("Recurring drift", "Drift recurrente"),
       body: t(
-        `Urgency or early entry appeared in ${earlyUrgent} of your last ${normalized.length} Neuro-tagged sessions. Protect the first setup and wait for confirmation.`,
-        `La urgencia o la entrada temprana aparecieron en ${earlyUrgent} de tus últimas ${normalized.length} sesiones con Neuro. Protege el primer setup y espera la confirmación.`
+        "Urgency is compressing your confirmation process. The correction is a decision gate, not more motivation.",
+        "La urgencia está comprimiendo tu proceso de confirmación. La corrección es un filtro de decisión, no más motivación."
       ),
       kind: "risk",
+      evidence: `${evidenceLine(earlyUrgent, sourceDates)} ${t("The record contains early-entry, urgency, or revenge-mode signals.", "El registro contiene señales de entrada temprana, urgencia o modo revancha.")}`,
+      nextAction: t(
+        "Require the planned confirmation and a 60-second pause before the first order. No confirmation means no entry.",
+        "Exige la confirmación planificada y una pausa de 60 segundos antes de la primera orden. Sin confirmación no hay entrada."
+      ),
+      successCheck: t(
+        "Next 3 sessions: no entered-early tag and every entry names its confirmation.",
+        "Próximas 3 sesiones: sin tag de entrada temprana y cada entrada identifica su confirmación."
+      ),
+      sourceDates,
+      sampleSize: normalized.length,
+      generatedBy: "rules",
     };
   }
 
   if (calmAligned >= 2) {
+    const sourceDates = datesFor(
+      (session) =>
+        session.neuro.inside.plan_followed === "yes" &&
+        session.neuro.inside.state.some((item) => item === "calm" || item === "patient" || item === "clear")
+    );
     return {
       title: t("Stable edge", "Edge estable"),
       body: t(
-        `Calm, patient states aligned with plan-following in ${calmAligned} of your last ${normalized.length} Neuro-tagged sessions. Protect that pace before increasing aggression.`,
-        `Los estados de calma y paciencia se alinearon con seguir el plan en ${calmAligned} de tus últimas ${normalized.length} sesiones con Neuro. Protege ese ritmo antes de aumentar agresividad.`
+        "Your repeatable advantage is the operating state that keeps execution aligned with the plan, independent of one session's P&L.",
+        "Tu ventaja repetible es el estado operativo que mantiene la ejecución alineada con el plan, independientemente del P&L de una sesión."
       ),
       kind: "strength",
+      evidence: `${evidenceLine(calmAligned, sourceDates)} ${t("Calm/patient/clear states coincided with plan-following.", "Los estados de calma/paciencia/claridad coincidieron con seguir el plan.")}`,
+      nextAction: t(
+        "Recreate the same pre-entry routine and keep position size unchanged until this behavior repeats three more times.",
+        "Repite la misma rutina antes de entrar y mantén el tamaño sin cambios hasta repetir esta conducta tres veces más."
+      ),
+      successCheck: t(
+        "Next 3 sessions: plan-followed yes with calm, patient, or clear selected.",
+        "Próximas 3 sesiones: plan seguido sí junto a calma, paciencia o claridad."
+      ),
+      sourceDates,
+      sampleSize: normalized.length,
+      generatedBy: "rules",
     };
   }
 
   if (clearInvalidation >= 2) {
+    const sourceDates = datesFor(
+      (session) => session.neuro.premarket.invalidation.length > 0 && session.neuro.inside.plan_followed === "yes"
+    );
     return {
       title: t("Protect this process", "Protege este proceso"),
       body: t(
-        `Clear invalidation was present in ${clearInvalidation} of your last ${normalized.length} Neuro-tagged sessions. Keep naming what breaks the trade before you enter.`,
-        `La invalidación clara estuvo presente en ${clearInvalidation} de tus últimas ${normalized.length} sesiones con Neuro. Sigue nombrando qué rompe el trade antes de entrar.`
+        "Defining invalidation before exposure is improving the quality of your decisions and making the review auditable.",
+        "Definir la invalidación antes de exponerte está mejorando la calidad de tus decisiones y hace auditable la revisión."
       ),
       kind: "strength",
+      evidence: `${evidenceLine(clearInvalidation, sourceDates)} ${t("A defined invalidation coincided with following the plan.", "Una invalidación definida coincidió con seguir el plan.")}`,
+      nextAction: t(
+        "Write one observable invalidation and the corresponding stop action before every entry.",
+        "Escribe una invalidación observable y la acción de stop correspondiente antes de cada entrada."
+      ),
+      successCheck: t(
+        "Next 3 sessions: every traded setup has invalidation documented before execution.",
+        "Próximas 3 sesiones: cada setup operado tiene la invalidación documentada antes de ejecutar."
+      ),
+      sourceDates,
+      sampleSize: normalized.length,
+      generatedBy: "rules",
     };
   }
 
   const latest = normalized[0];
   const latestSummary = computeNeuroSummary(latest.neuro);
   if (latestSummary.score != null) {
+    const isRisk = latestSummary.level === "drift" || latestSummary.level === "critical";
+    const actionByInsight: Record<string, { en: string; es: string }> = {
+      execution_drift: {
+        en: "Wait for the planned confirmation and document it before the next entry.",
+        es: "Espera la confirmación planificada y documéntala antes de la próxima entrada.",
+      },
+      plan_broken: {
+        en: "Turn the broken rule into a pre-entry yes/no gate for the next three sessions.",
+        es: "Convierte la regla rota en un filtro sí/no antes de entrar durante las próximas tres sesiones.",
+      },
+      emotional_exit: {
+        en: "Define the structural exit and stop action before entry; do not redesign it while emotion is elevated.",
+        es: "Define la salida estructural y el stop antes de entrar; no los rediseñes con emoción elevada.",
+      },
+      forced_trade: {
+        en: "Require setup, confirmation, and risk authorization before the next order.",
+        es: "Exige autorización de setup, confirmación y riesgo antes de la próxima orden.",
+      },
+      clear_process: {
+        en: "Repeat the same pre-entry sequence without increasing size yet.",
+        es: "Repite la misma secuencia antes de entrar sin aumentar tamaño todavía.",
+      },
+      calm_execution: {
+        en: "Preserve the same pace and record what helped you remain calm before entry.",
+        es: "Protege el mismo ritmo y registra qué te ayudó a mantener calma antes de entrar.",
+      },
+      mixed_signal: {
+        en: "Choose one decision rule to measure in the next session instead of changing several things at once.",
+        es: "Escoge una sola regla de decisión para medir en la próxima sesión en vez de cambiar varias cosas a la vez.",
+      },
+    };
+    const action = actionByInsight[latestSummary.insight_key] ?? actionByInsight.mixed_signal;
     return {
       title: t("Latest Neuro read", "Última lectura Neuro"),
       body: getNeuroInsightText(latestSummary.insight_key, lang),
-      kind: latestSummary.level === "strong" || latestSummary.level === "stable" ? "strength" : "neutral",
+      kind: isRisk ? "risk" : "strength",
+      evidence: t(
+        `${latest.date}: Neuro Score ${latestSummary.score}/100 from ${latestSummary.signals} recorded signals.`,
+        `${latest.date}: Neuro Score ${latestSummary.score}/100 basado en ${latestSummary.signals} señales registradas.`
+      ),
+      nextAction: action[lang],
+      successCheck: t(
+        "Complete the next session with the selected correction and compare the new Neuro Score.",
+        "Completa la próxima sesión con la corrección seleccionada y compara el nuevo Neuro Score."
+      ),
+      sourceDates: [latest.date],
+      sampleSize: normalized.length,
+      generatedBy: "rules",
     };
   }
 

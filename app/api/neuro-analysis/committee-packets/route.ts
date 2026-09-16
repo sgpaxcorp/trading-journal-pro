@@ -22,6 +22,7 @@ import {
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { GPT_6_ASTRA_MODEL } from "@/lib/openAiModelConfig";
 import {
   auditAiFinancialPayload,
   FINANCIAL_DATA_INTEGRITY_PROMPT,
@@ -35,7 +36,7 @@ import {
 export const runtime = "nodejs";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const MODEL = process.env.OPENAI_NEURO_ANALYSIS_MODEL || "gpt-5.5";
+const MODEL = process.env.OPENAI_NEURO_ANALYSIS_MODEL || GPT_6_ASTRA_MODEL;
 
 function cleanText(value: unknown, maxLength: number) {
   return String(value ?? "").trim().slice(0, maxLength);

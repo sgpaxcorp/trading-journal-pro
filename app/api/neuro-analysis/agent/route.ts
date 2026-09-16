@@ -35,6 +35,7 @@ import {
   enforceMasterInvestmentSystemOutput,
   withMasterInvestmentSystemPrinciple,
 } from "@/lib/neuroMasterInvestmentPrinciple";
+import { GPT_6_ASTRA_MODEL } from "@/lib/openAiModelConfig";
 
 export const runtime = "nodejs";
 
@@ -42,7 +43,7 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const MODEL =
   process.env.OPENAI_NEURO_AGENT_MODEL ||
   process.env.OPENAI_NEURO_ANALYSIS_MODEL ||
-  "gpt-5.5";
+  GPT_6_ASTRA_MODEL;
 
 function cleanQuestion(value: unknown) {
   return String(value ?? "").trim().slice(0, 3_000);

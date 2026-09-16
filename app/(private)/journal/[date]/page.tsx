@@ -4668,6 +4668,32 @@ export default function DailyJournalPage() {
                 </p>
                 <p className="mt-1 text-sm font-semibold text-slate-100">{journalNeuroMemory.title}</p>
                 <p className="mt-1.5 text-xs leading-relaxed text-slate-200/90">{journalNeuroMemory.body}</p>
+                {journalNeuroMemory.evidence ? (
+                  <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/35 px-3 py-2">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                      {L("Evidence", "Evidencia")}
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-200">
+                      {journalNeuroMemory.evidence}
+                    </p>
+                  </div>
+                ) : null}
+                {journalNeuroMemory.nextAction ? (
+                  <div className="mt-2 rounded-lg border border-emerald-300/20 bg-emerald-400/8 px-3 py-2">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-emerald-200/80">
+                      {L("Coach instruction", "Instrucción del coach")}
+                    </p>
+                    <p className="mt-1 text-[11px] font-medium leading-relaxed text-emerald-50">
+                      {journalNeuroMemory.nextAction}
+                    </p>
+                  </div>
+                ) : null}
+                {journalNeuroMemory.successCheck ? (
+                  <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
+                    <span className="font-semibold text-slate-300">{L("Measurement", "Medición")}:</span>{" "}
+                    {journalNeuroMemory.successCheck}
+                  </p>
+                ) : null}
               </div>
               <div
                 className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${

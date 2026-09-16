@@ -7,7 +7,12 @@ import {
   nextWeekdayDateKey,
   type OptionFlowTrackedFlow,
 } from "@/lib/optionFlowLearning";
-import { fetchOptionFlowIntradayCandles, optionFlowYahooSymbol } from "@/lib/optionFlowMarketData";
+import {
+  fetchOptionFlowContractCandles,
+  fetchOptionFlowIntradayCandles,
+  optionFlowYahooContractSymbol,
+  optionFlowYahooSymbol,
+} from "@/lib/optionFlowMarketData";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 type ScheduleLearningInput = {
@@ -34,6 +39,8 @@ type LearningRunRow = {
   tracked_flows?: OptionFlowTrackedFlow[] | null;
   analysis_snapshot?: Record<string, any> | null;
 };
+
+const MAX_CONTRACTS_PER_LEARNING_RUN = 20;
 
 export async function scheduleOptionFlowLearning(input: ScheduleLearningInput) {
   const schedule = buildLearningSchedule(input.sourceSessionDate);
@@ -92,13 +99,41 @@ async function evaluateOneRun(row: LearningRunRow, now: Date) {
   }
 
   const snapshot = row.analysis_snapshot ?? {};
+  const trackedFlows = Array.isArray(row.tracked_flows) ? row.tracked_flows : [];
+  const prioritizedContracts = Array.from(
+    new Map(
+      [...trackedFlows]
+        .filter((flow) =>
+          Boolean(optionFlowYahooContractSymbol(flow.contract)) &&
+          Number(flow.entryOptionPrice) > 0
+        )
+        .sort((left, right) => {
+          const leftClosing = Number(left.clockMinutes ?? 0) >= 15 * 60 + 30 ? 1 : 0;
+          const rightClosing = Number(right.clockMinutes ?? 0) >= 15 * 60 + 30 ? 1 : 0;
+          return rightClosing - leftClosing || Number(right.premium ?? 0) - Number(left.premium ?? 0);
+        })
+        .map((flow) => [flow.contract, flow] as const)
+    ).keys()
+  ).slice(0, MAX_CONTRACTS_PER_LEARNING_RUN);
+  const contractCandleEntries = await Promise.all(
+    prioritizedContracts.map(async (contract) => [
+      contract,
+      await fetchOptionFlowContractCandles({
+        contract,
+        startDate: row.source_session_date,
+        endDate: row.target_session_date,
+      }),
+    ] as const)
+  );
+  const contractCandlesBySymbol = Object.fromEntries(contractCandleEntries);
   const validation = evaluateOptionFlowMarketResponse({
     sourceSessionDate: row.source_session_date,
     targetSessionDate: row.target_session_date,
     candles,
-    trackedFlows: Array.isArray(row.tracked_flows) ? row.tracked_flows : [],
+    trackedFlows,
     analysisBias: snapshot.flowBias,
     fallbackSourceClose: snapshot.previousClose ?? snapshot.spotEstimate,
+    contractCandlesBySymbol,
     evaluatedAt: now,
   });
   if (!validation) {

@@ -5,12 +5,16 @@ import { getAuthUser } from "@/lib/authServer";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { isSmartToolsOwner } from "@/lib/smartToolsAccess";
 import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
+import { GPT_6_ASTRA_MODEL, openAiChatTuning } from "@/lib/openAiModelConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const DEFAULT_MODEL = process.env.OPENAI_OPTIONFLOW_CHAT_MODEL || process.env.OPENAI_OPTIONFLOW_MODEL || "gpt-4.1";
+const DEFAULT_MODEL =
+  process.env.OPENAI_OPTIONFLOW_CHAT_MODEL ||
+  process.env.OPENAI_OPTIONFLOW_MODEL ||
+  GPT_6_ASTRA_MODEL;
 
 const BYPASS_ENTITLEMENT =
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "").toLowerCase() === "true" ||
@@ -122,6 +126,8 @@ Reglas críticas:
 - Si analysis.dataQuality.isStale es true, indica que la data es vieja (-1DTE o anterior).
 - Si te piden una decisión ("¿sí o no?"), responde "Sí", "No" o "No hay data suficiente", y explica en 1-2 líneas.
 - Siempre distingue calls vs puts y BID vs ASK cuando menciones strikes o contratos.
+- Para preguntas sobre hoy, lee lateSessionTape en orden: 1:30-3:00, 3:00-3:30 y 3:30-4:15. Da mayor peso al cierre y separa el movimiento ya completado de la señal que continuó abierta.
+- Si existe contractEvaluation, responde con precio de entrada, máximo, hora del máximo, cierre y rendimiento observado. No sustituyas eso con el movimiento del underlying.
 - No des recomendaciones financieras; solo lectura de flujo y riesgos con base en data.
 Responde en español.
 ${extraGuidance}
@@ -135,6 +141,8 @@ Critical rules:
 - If analysis.dataQuality.isStale is true, say the data is old (-1DTE or earlier).
 - If asked for a decision ("yes or no?"), answer "Yes", "No", or "Insufficient data" and explain in 1-2 lines.
 - Always distinguish calls vs puts and BID vs ASK when referencing strikes/contracts.
+- For questions about today, read lateSessionTape in order: 1:30-3:00, 3:00-3:30, and 3:30-4:15. Give the close the most weight and separate a completed move from the signal carried forward.
+- When contractEvaluation exists, answer with entry price, high, time of high, close, and observed return. Do not substitute the underlying move.
 - Do not give financial advice; provide flow read and risks only, based on data.
 Respond in English.
 ${extraGuidance}
@@ -153,7 +161,7 @@ ${extraGuidance}
         { role: "system", content: systemPrompt.trim() },
         { role: "user", content: JSON.stringify(payload, null, 2) },
       ],
-      temperature: 0.2,
+      ...openAiChatTuning(DEFAULT_MODEL, 0.2),
     });
 
     const reply = completion.choices[0]?.message?.content?.trim() || "";

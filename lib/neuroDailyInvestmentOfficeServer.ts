@@ -28,12 +28,16 @@ import {
 } from "@/lib/neuroSecFilings";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { isTradingSessionDate } from "@/lib/tradingCalendar";
+import { GPT_6_ASTRA_MODEL } from "@/lib/openAiModelConfig";
 import {
   MASTER_INVESTMENT_SYSTEM_POLICY_VERSION,
   withMasterInvestmentSystemPrinciple,
 } from "@/lib/neuroMasterInvestmentPrinciple";
 
-const MODEL = process.env.OPENAI_NEURO_DAILY_OFFICE_MODEL || process.env.OPENAI_NEURO_ANALYSIS_MODEL || "gpt-5.5";
+const MODEL =
+  process.env.OPENAI_NEURO_DAILY_OFFICE_MODEL ||
+  process.env.OPENAI_NEURO_ANALYSIS_MODEL ||
+  GPT_6_ASTRA_MODEL;
 const MAX_TRACKED_TICKERS = 25;
 
 type ThesisRecord = {

@@ -47,6 +47,10 @@ export type DashboardCoachActionPlan = {
   ruleToAdd: string;
   ruleToRemove: string;
   checkpointFocus: string;
+  neuroPattern: string;
+  neuroEvidence: string;
+  neuroAction: string;
+  neuroSuccessCheck: string;
 };
 
 export type DashboardCoachPlan = {
@@ -184,7 +188,7 @@ export function dashboardCoachSourceSignature(source: DashboardCoachSource) {
     plan: source.plan ? { ...source.plan, updatedAt: undefined } : null,
     sessions: source.sessions.map((session) => ({ ...session, updatedAt: undefined })),
   };
-  return `v2-${hashText(JSON.stringify(evidence))}`;
+  return `v3-${hashText(JSON.stringify(evidence))}`;
 }
 
 export function dashboardCoachInstructions(language: "en" | "es") {
@@ -195,6 +199,9 @@ export function dashboardCoachInstructions(language: "en" | "es") {
       "La sesión más reciente es obligatoria: menciona su fecha exacta, P&L y cumplimiento del plan en whatISee.",
       "Compara la sesión más reciente con las anteriores cuando exista evidencia suficiente.",
       "Distingue resultado económico de calidad de ejecución. Una ganancia no convierte una ruptura de reglas en buena ejecución.",
+      "Para Neuro Memory, identifica un solo patrón conductual respaldado por la data de Neuro Layer incluida en notes (estado, cambios, seguimiento del plan y verdad posterior).",
+      "neuroEvidence debe citar fechas y conteos concretos. neuroAction debe ser una instrucción ejecutable en la próxima sesión. neuroSuccessCheck debe definir cómo medirla durante las próximas 3 sesiones.",
+      "Si no existe evidencia Neuro suficiente, dilo claramente en los cuatro campos Neuro; no infieras psicología a partir del P&L.",
       "No inventes operaciones, causas, emociones ni conclusiones. Cuando falte evidencia, dilo de forma puntual.",
       "Mantén un criterio estable: la misma data debe producir prácticamente la misma evaluación y prioridad.",
       "Escribe como un coach humano, directo y profesional; evita frases genéricas o motivacionales sin soporte.",
@@ -209,6 +216,9 @@ export function dashboardCoachInstructions(language: "en" | "es") {
     "The newest session is mandatory: mention its exact date, P&L, and plan compliance in whatISee.",
     "Compare the newest session with earlier sessions when the evidence supports it.",
     "Separate financial outcome from execution quality. A profit does not make a rule violation good execution.",
+    "For Neuro Memory, identify one behavioral pattern supported by the Neuro Layer data included in notes (state, changes, plan-following, and after-trade truth).",
+    "neuroEvidence must cite exact dates and counts. neuroAction must be executable in the next session. neuroSuccessCheck must define how to measure it over the next 3 sessions.",
+    "If Neuro evidence is insufficient, say so clearly in all four Neuro fields; never infer psychology from P&L.",
     "Do not invent trades, causes, emotions, or conclusions. State missing evidence directly.",
     "Keep the standard stable: identical data should yield nearly identical evaluation and priority.",
     "Sound like a direct, professional human coach; avoid unsupported generic motivation.",
@@ -235,6 +245,10 @@ export const DASHBOARD_COACH_RESPONSE_FORMAT = {
         ruleToAdd: { type: "string" },
         ruleToRemove: { type: "string" },
         checkpointFocus: { type: "string" },
+        neuroPattern: { type: "string" },
+        neuroEvidence: { type: "string" },
+        neuroAction: { type: "string" },
+        neuroSuccessCheck: { type: "string" },
         referencedDates: {
           type: "array",
           items: { type: "string" },
@@ -250,6 +264,10 @@ export const DASHBOARD_COACH_RESPONSE_FORMAT = {
         "ruleToAdd",
         "ruleToRemove",
         "checkpointFocus",
+        "neuroPattern",
+        "neuroEvidence",
+        "neuroAction",
+        "neuroSuccessCheck",
         "referencedDates",
       ],
     },
@@ -312,6 +330,10 @@ export function normalizeDashboardCoachPlan(params: {
       ruleToAdd: requiredText(raw?.ruleToAdd, fallback, 300),
       ruleToRemove: requiredText(raw?.ruleToRemove, fallback, 300),
       checkpointFocus: requiredText(raw?.checkpointFocus, fallback, 300),
+      neuroPattern: requiredText(raw?.neuroPattern, fallback, 500),
+      neuroEvidence: requiredText(raw?.neuroEvidence, fallback, 500),
+      neuroAction: requiredText(raw?.neuroAction, fallback, 400),
+      neuroSuccessCheck: requiredText(raw?.neuroSuccessCheck, fallback, 400),
     },
   };
 }

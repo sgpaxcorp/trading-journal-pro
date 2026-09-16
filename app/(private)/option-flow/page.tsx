@@ -63,6 +63,30 @@ type SqueezeScenario = {
   brakes?: string;
 };
 
+type LateSessionFlow = {
+  contract?: string;
+  type?: string | null;
+  side?: string;
+  direction?: string;
+  time?: string | null;
+  entryOptionPrice?: number | null;
+  premium?: number;
+};
+
+type LateSessionBucket = {
+  key?: "positioning" | "transition" | "closing";
+  label?: string;
+  printCount?: number;
+  bullishPremium?: number;
+  bearishPremium?: number;
+  netDirectionalPremium?: number;
+  bias?: string;
+  spotStart?: number | null;
+  spotEnd?: number | null;
+  spotChangePct?: number | null;
+  topContracts?: LateSessionFlow[];
+};
+
 type AnalysisData = {
   summary?: string;
   flowBias?: string | null;
@@ -78,6 +102,22 @@ type AnalysisData = {
     bearish?: { trigger?: string; confirmation?: string; invalidation?: string; risk?: string };
     range?: { trigger?: string; confirmation?: string; invalidation?: string; risk?: string };
   };
+  lateSessionTape?: {
+    sourceSessionDate?: string | null;
+    window?: string;
+    totalPrints?: number;
+    carryForwardBias?: string;
+    regimeShift?: { detected?: boolean; at?: string | null; from?: string | null; to?: string | null };
+    buckets?: LateSessionBucket[];
+    closingContracts?: LateSessionFlow[];
+  };
+  lateSessionRead?: {
+    completedMove?: string;
+    regimeShift?: string;
+    carryForward?: string;
+    todayBehavior?: string;
+    contractsToTrack?: string[];
+  } | null;
   keyLevels?: { price?: number; label?: string; reason?: string; side?: string }[];
   keyTrades?: any[];
   expirations?: ExpirationBucket[];
@@ -115,6 +155,9 @@ type AnalysisData = {
   suggestedFocus?: string[];
   dataQuality?: {
     totalRows?: number;
+    sourceRows?: number;
+    lateSessionRows?: number;
+    lateSessionWindowApplied?: boolean;
     withSide?: number;
     withPremium?: number;
     withOi?: number;
@@ -152,6 +195,25 @@ type OptionFlowLearningEvaluation = {
   closeRawPct?: number;
 };
 
+type OptionFlowContractEvaluation = {
+  status?: "available" | "missing_entry_price" | "no_market_data";
+  entryPrice?: number | null;
+  targetOpen?: number | null;
+  maxPrice?: number | null;
+  maxPriceAt?: string | null;
+  maxPriceReturnPct?: number | null;
+  minPrice?: number | null;
+  minPriceAt?: string | null;
+  closePrice?: number | null;
+  closePriceReturnPct?: number | null;
+  first25PctAt?: string | null;
+  first50PctAt?: string | null;
+  first100PctAt?: string | null;
+  minutesToMaxPrice?: number | null;
+  aggressorAlignedMaxPct?: number | null;
+  aggressorAlignedClosePct?: number | null;
+};
+
 type OptionFlowLearningRun = {
   id: string;
   memory_id?: string | null;
@@ -166,8 +228,10 @@ type OptionFlowLearningRun = {
     side?: string;
     direction?: string;
     time?: string | null;
+    entryOptionPrice?: number | null;
     premium?: number;
     evaluation?: OptionFlowLearningEvaluation | null;
+    contractEvaluation?: OptionFlowContractEvaluation | null;
   }>;
   market_validation?: {
     targetSession?: {
@@ -189,8 +253,10 @@ type OptionFlowLearningRun = {
       side?: string;
       direction?: string;
       time?: string | null;
+      entryOptionPrice?: number | null;
       premium?: number;
       evaluation?: OptionFlowLearningEvaluation | null;
+      contractEvaluation?: OptionFlowContractEvaluation | null;
     }>;
   } | null;
   evaluated_at?: string | null;
@@ -373,7 +439,7 @@ function isoDate(d: Date): string {
 function defaultFlowSessionDate(now = new Date()) {
   let dateKey = marketDateKey(now);
   const minute = marketClockMinutes(now);
-  if (minute != null && minute < 13 * 60) dateKey = addCalendarDays(dateKey, -1);
+  if (minute != null && minute < 13 * 60 + 30) dateKey = addCalendarDays(dateKey, -1);
   while (dateKey) {
     const day = new Date(`${dateKey}T12:00:00Z`).getUTCDay();
     if (day >= 1 && day <= 5) return dateKey;
@@ -1946,6 +2012,83 @@ export default function OptionFlowPage() {
       sections.push(
         `<p><strong>${isEs ? "Sesgo macro" : "Macro bias"}:</strong> ${bias}</p>`
       );
+    }
+
+    if (data.lateSessionTape?.buckets?.length) {
+      const money = (value?: number) =>
+        Number.isFinite(Number(value))
+          ? new Intl.NumberFormat(localeTag, {
+              style: "currency",
+              currency: "USD",
+              maximumFractionDigits: 0,
+              notation: "compact",
+            }).format(Number(value))
+          : "—";
+      sections.push(
+        `<h3>${isEs ? "Secuencia de ayer por la tarde → lectura para hoy" : "Yesterday afternoon sequence → today's read"}</h3>`
+      );
+      sections.push(
+        `<table style="width:100%;border-collapse:collapse;margin-top:8px;">` +
+          `<thead><tr>` +
+          `<th style="text-align:left;padding:6px 4px;">${isEs ? "Ventana" : "Window"}</th>` +
+          `<th style="text-align:left;padding:6px 4px;">${isEs ? "Sesgo" : "Bias"}</th>` +
+          `<th style="text-align:left;padding:6px 4px;">${isEs ? "Prima alcista" : "Bullish premium"}</th>` +
+          `<th style="text-align:left;padding:6px 4px;">${isEs ? "Prima bajista" : "Bearish premium"}</th>` +
+          `<th style="text-align:left;padding:6px 4px;">${isEs ? "Spot ini→fin" : "Spot start→end"}</th>` +
+          `<th style="text-align:left;padding:6px 4px;">${isEs ? "Contratos principales" : "Top contracts"}</th>` +
+          `</tr></thead><tbody>` +
+          data.lateSessionTape.buckets
+            .map((bucket) => {
+              const spot =
+                bucket.spotStart != null && bucket.spotEnd != null
+                  ? `${Number(bucket.spotStart).toFixed(2)}→${Number(bucket.spotEnd).toFixed(2)} (${Number(bucket.spotChangePct ?? 0).toFixed(2)}%)`
+                  : "—";
+              const contracts = (bucket.topContracts ?? [])
+                .slice(0, 3)
+                .map((flow) => {
+                  const price = Number.isFinite(Number(flow.entryOptionPrice))
+                    ? ` @ ${Number(flow.entryOptionPrice).toFixed(2)}`
+                    : "";
+                  return `${flow.contract ?? ""}${flow.time ? ` ${flow.time}` : ""}${price}`;
+                })
+                .filter(Boolean)
+                .join("; ");
+              return `<tr>` +
+                `<td style="padding:4px;border-bottom:1px solid rgba(30,41,59,0.6);">${escapeHtml(bucket.label ?? "")}</td>` +
+                `<td style="padding:4px;border-bottom:1px solid rgba(30,41,59,0.6);">${escapeHtml(bucket.bias ?? "")}</td>` +
+                `<td style="padding:4px;border-bottom:1px solid rgba(30,41,59,0.6);">${money(bucket.bullishPremium)}</td>` +
+                `<td style="padding:4px;border-bottom:1px solid rgba(30,41,59,0.6);">${money(bucket.bearishPremium)}</td>` +
+                `<td style="padding:4px;border-bottom:1px solid rgba(30,41,59,0.6);">${spot}</td>` +
+                `<td style="padding:4px;border-bottom:1px solid rgba(30,41,59,0.6);">${escapeHtml(contracts || "—")}</td>` +
+                `</tr>`;
+            })
+            .join("") +
+          `</tbody></table>`
+      );
+      if (data.lateSessionRead) {
+        const read = data.lateSessionRead;
+        sections.push(`<h4>${isEs ? "Qué se agotó y qué puede continuar" : "What finished and what may carry"}</h4>`);
+        sections.push(
+          `<ul>` +
+            [
+              read.completedMove ? `${isEs ? "Movimiento completado" : "Completed move"}: ${read.completedMove}` : "",
+              read.regimeShift ? `${isEs ? "Cambio de régimen" : "Regime shift"}: ${read.regimeShift}` : "",
+              read.carryForward ? `${isEs ? "Señal al cierre" : "Closing signal"}: ${read.carryForward}` : "",
+              read.todayBehavior ? `${isEs ? "Comportamiento para hoy" : "Today's behavior"}: ${read.todayBehavior}` : "",
+            ]
+              .filter(Boolean)
+              .map((line) => `<li>${escapeHtml(line)}</li>`)
+              .join("") +
+            `</ul>`
+        );
+        if (read.contractsToTrack?.length) {
+          sections.push(
+            `<p><strong>${isEs ? "Contratos a seguir" : "Contracts to track"}:</strong></p><ul>` +
+              read.contractsToTrack.map((item) => `<li>${escapeHtml(item)}</li>`).join("") +
+              `</ul>`
+          );
+        }
+      }
     }
 
     if (data.expirations && data.expirations.length) {
@@ -3543,6 +3686,9 @@ export default function OptionFlowPage() {
           uploadId: analysisId,
           notes: note || null,
           tradeIntent,
+          sourceSessionDate: analysisData?.meta?.sourceSessionDate ?? flowSessionDate,
+          lateSessionTape: analysisData?.lateSessionTape ?? null,
+          lateSessionRead: analysisData?.lateSessionRead ?? null,
           language: lang,
         }),
       });
@@ -4027,8 +4173,8 @@ export default function OptionFlowPage() {
               className="ml-2 rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100"
               title={
                 isEs
-                  ? "Día en que ocurrieron los flows de 1:00–4:00 PM ET"
-                  : "Session when the 1:00-4:00 PM ET flows occurred"
+                  ? "Día en que ocurrieron los flows de 1:30–4:15 PM ET"
+                  : "Session when the 1:30-4:15 PM ET flows occurred"
               }
             />
           </label>
@@ -4275,8 +4421,8 @@ export default function OptionFlowPage() {
               </p>
               <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
                 {isEs
-                  ? "Valida automáticamente los flows de 1:00–4:00 PM ET contra la próxima sesión y aprende cuándo el underlying confirmó o contradijo la lectura."
-                  : "Automatically validates 1:00-4:00 PM ET flows against the next session and learns when the underlying confirmed or contradicted the read."}
+                  ? "Valida automáticamente los flows de 1:30–4:15 PM ET contra la próxima sesión y aprende cuándo el underlying y cada contrato confirmaron, alcanzaron máximo o fallaron."
+                  : "Automatically validates 1:30-4:15 PM ET flows against the next session and learns when the underlying and each contract confirmed, peaked, or failed."}
               </p>
             </div>
             <span className="rounded-full border border-slate-700 px-2.5 py-1 text-[10px] text-slate-400">
@@ -4370,18 +4516,22 @@ export default function OptionFlowPage() {
                         </div>
                       </div>
 
-                      {evaluatedFlows.some((flow) => flow.evaluation) && (
+                      {evaluatedFlows.some(
+                        (flow) => flow.evaluation || flow.contractEvaluation?.status === "available"
+                      ) && (
                         <div className="mt-3 space-y-1.5">
                           <p className="text-[9px] uppercase tracking-[0.2em] text-slate-500">
                             {isEs ? "Respuesta por transacción" : "Response by transaction"}
                           </p>
                           {evaluatedFlows
-                            .filter((flow) => flow.evaluation)
+                            .filter(
+                              (flow) => flow.evaluation || flow.contractEvaluation?.status === "available"
+                            )
                             .slice(0, 6)
                             .map((flow, index) => (
                               <div
                                 key={`${flow.contract ?? "flow"}-${index}`}
-                                className="grid gap-1 rounded-xl border border-slate-800/80 px-2.5 py-2 text-[10.5px] text-slate-300 sm:grid-cols-[1.25fr_0.7fr_1fr]"
+                                className="grid gap-1 rounded-xl border border-slate-800/80 px-2.5 py-2 text-[10.5px] text-slate-300 sm:grid-cols-[1.25fr_0.7fr_1fr_1.25fr]"
                               >
                                 <span className="font-medium text-slate-100">
                                   {flow.contract || `${flow.type ?? ""} ${flow.side ?? ""}`}
@@ -4392,6 +4542,11 @@ export default function OptionFlowPage() {
                                   {flow.evaluation?.firstConfirmedAt
                                     ? `${isEs ? "Confirmó" : "Confirmed"} ${formatMarketDateTime(flow.evaluation.firstConfirmedAt, localeTag)}`
                                     : isEs ? "No tocó +0.25% a favor" : "Did not reach +0.25% favorable"}
+                                </span>
+                                <span>
+                                  {flow.contractEvaluation?.status === "available"
+                                    ? `${isEs ? "Contrato" : "Contract"}: ${Number(flow.contractEvaluation.entryPrice).toFixed(2)}→${Number(flow.contractEvaluation.maxPrice).toFixed(2)} (${formatLearningPercent(flow.contractEvaluation.maxPriceReturnPct)}) · ${formatMarketDateTime(flow.contractEvaluation.maxPriceAt, localeTag)}`
+                                    : isEs ? "Precio del contrato no disponible" : "Contract price unavailable"}
                                 </span>
                               </div>
                             ))}
@@ -4416,8 +4571,8 @@ export default function OptionFlowPage() {
 
           <p className="text-[10px] leading-relaxed text-slate-500">
             {isEs
-              ? "La validación mide el movimiento del underlying, no el P/L del contrato. ASK/BID indica el agresor, pero no prueba apertura o cierre. Para medir depreciación real hacen falta precios históricos de la opción, IV, spread y fills."
-              : "Validation measures the underlying move, not contract P/L. ASK/BID identifies the aggressor but does not prove opening or closing. Actual option decay requires historical option prices, IV, spread, and fills."}
+              ? "La validación separa el movimiento del underlying del precio real observado del contrato. Muestra entrada, máximo, mínimo, cierre y hora cuando existe data intradía. ASK/BID indica el agresor, pero no prueba apertura o cierre ni garantiza un fill en el máximo."
+              : "Validation separates the underlying move from the observed contract price. It shows entry, high, low, close, and timing when intraday data is available. ASK/BID identifies the aggressor but does not prove opening or closing or guarantee a fill at the high."}
           </p>
         </div>
       )}

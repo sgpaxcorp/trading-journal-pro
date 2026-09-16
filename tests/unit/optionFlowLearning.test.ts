@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildLateSessionTrackedFlows,
+  buildLateSessionTape,
   buildLearningSchedule,
   directionFromOptionPrint,
   evaluateOptionFlowMarketResponse,
+  evaluateOptionFlowContractResponse,
   flowRowSessionDate,
   nextWeekdayDateKey,
   optionFlowUnderlyingsMatch,
@@ -35,7 +37,7 @@ describe("Option Flow learning", () => {
     expect(directionFromOptionPrint("C", "MID")).toBe("unknown");
   });
 
-  it("recognizes the 1 PM through 4 PM market-time window", () => {
+  it("recognizes the 1:30 PM through 4:15 PM market-time window", () => {
     expect(parseFlowClockMinutes("12:59 PM")).toBe(12 * 60 + 59);
     expect(parseFlowClockMinutes("1:00 PM")).toBe(13 * 60);
     expect(parseFlowClockMinutes("15:42:10")).toBe(15 * 60 + 42);
@@ -45,15 +47,17 @@ describe("Option Flow learning", () => {
 
     const tracked = buildLateSessionTrackedFlows(
       [
-        { underlying: "SPX", type: "C", side: "ASK", time: "12:59 PM", premium: 900_000 },
-        { underlying: "SPX", type: "C", side: "ASK", time: "1:05 PM", premium: 500_000 },
+        { underlying: "SPX", type: "C", side: "ASK", time: "1:29 PM", premium: 900_000 },
+        { underlying: "SPX", type: "C", side: "ASK", time: "1:30 PM", premium: 500_000 },
         { underlying: "SPX", type: "P", side: "ASK", time: "3:58 PM", premium: 700_000 },
+        { underlying: "SPX", type: "C", side: "ASK", time: "4:15 PM", premium: 600_000 },
+        { underlying: "SPX", type: "C", side: "ASK", time: "4:16 PM", premium: 800_000 },
       ],
       "SPX"
     );
 
-    expect(tracked).toHaveLength(2);
-    expect(tracked.map((flow) => flow.time)).toEqual(["3:58 PM", "1:05 PM"]);
+    expect(tracked).toHaveLength(3);
+    expect(tracked.map((flow) => flow.time)).toEqual(["3:58 PM", "4:15 PM", "1:30 PM"]);
   });
 
   it("accepts the SPXW weekly root when the requested underlying is SPX", () => {
@@ -80,8 +84,99 @@ describe("Option Flow learning", () => {
       "SPX"
     );
 
-    expect(tracked).toHaveLength(1);
-    expect(tracked[0]?.contract).toBe("SPXW260915C07600000");
+    expect(tracked).toHaveLength(2);
+    expect(tracked.map((flow) => flow.contract)).toEqual([
+      "SPXW260915C07625000",
+      "SPXW260915C07600000",
+    ]);
+  });
+
+  it("keeps afternoon phases separate and carries the closing regime into the next session", () => {
+    const tape = buildLateSessionTape(
+      [
+        {
+          sourceSessionDate: "2026-09-15",
+          symbol: "SPXW260916P07550000",
+          underlying: "SPXW",
+          type: "P",
+          side: "ASK",
+          time: "2:45 PM",
+          premium: 500_000,
+          tradePrice: 18,
+          underlyingPrice: 7560,
+        },
+        {
+          sourceSessionDate: "2026-09-15",
+          symbol: "SPXW260916C07575000",
+          underlying: "SPXW",
+          type: "C",
+          side: "ASK",
+          time: "3:36 PM",
+          premium: 750_000,
+          tradePrice: 18,
+          underlyingPrice: 7555,
+        },
+        {
+          sourceSessionDate: "2026-09-14",
+          symbol: "SPXW260915P07550000",
+          underlying: "SPXW",
+          type: "P",
+          side: "ASK",
+          time: "3:50 PM",
+          premium: 5_000_000,
+          tradePrice: 10,
+          underlyingPrice: 7500,
+        },
+      ],
+      "SPX",
+      "2026-09-15"
+    );
+
+    expect(tape.totalPrints).toBe(2);
+    expect(tape.buckets.map((bucket) => bucket.bias)).toEqual(["bearish", "neutral", "bullish"]);
+    expect(tape.regimeShift).toMatchObject({ detected: true, from: "bearish", to: "bullish" });
+    expect(tape.carryForwardBias).toBe("bullish");
+    expect(tape.closingContracts[0]).toMatchObject({
+      contract: "SPXW260916C07575000",
+      entryOptionPrice: 18,
+      time: "3:36 PM",
+    });
+  });
+
+  it("measures a contract entered at 18 that reaches 40 and records when it happened", () => {
+    const targetDate = "2026-09-16";
+    const result = evaluateOptionFlowContractResponse(
+      {
+        contract: "SPXW260916C07575000",
+        underlying: "SPX",
+        expiry: targetDate,
+        strike: 7575,
+        type: "C",
+        side: "ASK",
+        direction: "bullish",
+        time: "3:36 PM",
+        clockMinutes: 15 * 60 + 36,
+        timestamp: null,
+        referenceUnderlyingPrice: 7555,
+        entryOptionPrice: 18,
+        premium: 750_000,
+        size: 100,
+        oi: 50,
+      },
+      [
+        candle(targetDate, 9, 30, { open: 20, high: 22, low: 17, close: 21 }),
+        candle(targetDate, 10, 15, { open: 35, high: 40, low: 34, close: 39 }),
+        candle(targetDate, 15, 55, { open: 30, high: 32, low: 29, close: 31 }),
+      ]
+    );
+
+    expect(result.status).toBe("available");
+    expect(result.entryPrice).toBe(18);
+    expect(result.maxPrice).toBe(40);
+    expect(result.maxPriceReturnPct).toBeCloseTo(122.2222, 4);
+    expect(result.maxPriceAt).toBe("2026-09-16T14:15:00.000Z");
+    expect(result.first100PctAt).toBe("2026-09-16T14:15:00.000Z");
+    expect(result.minutesToMaxPrice).toBe(45);
   });
 
   it("detects and preserves the selected trading date in mixed-session CSV rows", () => {

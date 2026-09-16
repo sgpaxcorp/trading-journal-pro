@@ -6,13 +6,14 @@ import { getAuthUser } from "@/lib/authServer";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { isSmartToolsOwner } from "@/lib/smartToolsAccess";
 import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
+import { GPT_6_ASTRA_MODEL, openAiChatTuning } from "@/lib/openAiModelConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const DEFAULT_MODEL = process.env.OPENAI_OPTIONFLOW_MODEL || "gpt-4.1";
-const VISION_MODEL = process.env.OPENAI_OPTIONFLOW_VISION_MODEL || "gpt-4o";
+const DEFAULT_MODEL = process.env.OPENAI_OPTIONFLOW_MODEL || GPT_6_ASTRA_MODEL;
+const VISION_MODEL = process.env.OPENAI_OPTIONFLOW_VISION_MODEL || GPT_6_ASTRA_MODEL;
 
 const MAX_CHART_BYTES = 6 * 1024 * 1024;
 const ALLOWED_CHART_MIMES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -153,14 +154,15 @@ Return valid JSON with this shape:
           ]
         : JSON.stringify(payload, null, 2);
 
+    const modelToUse = chartDataUrl ? VISION_MODEL : DEFAULT_MODEL;
     const completion = await openai.chat.completions.create({
-      model: chartDataUrl ? VISION_MODEL : DEFAULT_MODEL,
+      model: modelToUse,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content },
       ],
       response_format: { type: "json_object" },
-      temperature: 0.2,
+      ...openAiChatTuning(modelToUse, 0.2),
     });
 
     const raw = completion.choices[0]?.message?.content ?? "{}";
@@ -170,7 +172,7 @@ Return valid JSON with this shape:
       feature: "option_flow",
       category: "market_intelligence",
       operation: chartDataUrl ? "outcome_review_with_vision" : "outcome_review",
-      model: completion.model || (chartDataUrl ? VISION_MODEL : DEFAULT_MODEL),
+      model: completion.model || modelToUse,
       usage: completion.usage,
     });
     let postMortem: any = null;

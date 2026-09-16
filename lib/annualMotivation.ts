@@ -5,6 +5,11 @@ type AnnualMotivationCopy = {
   body: string;
 };
 
+export type DailyPushMotivationCopy = AnnualMotivationCopy & {
+  dateKey: string;
+  sequence: number;
+};
+
 const EN_TITLES = [
   "Neuro Trader - Business Briefing",
   "Neuro Trader - Capital Protection",
@@ -193,6 +198,162 @@ const ES_CLOSERS = [
   "Una sesión limpia ya es progreso real.",
 ];
 
+const EN_PUSH_TITLES = [
+  "Daily focus",
+  "Protect capital",
+  "Trade the plan",
+  "Execution check",
+  "Operator focus",
+  "Risk first",
+  "Business discipline",
+];
+
+const ES_PUSH_TITLES = [
+  "Enfoque de hoy",
+  "Protege el capital",
+  "Opera el plan",
+  "Chequeo de ejecución",
+  "Enfoque del operador",
+  "Riesgo primero",
+  "Disciplina empresarial",
+];
+
+const EN_PUSH_LEADS = [
+  "Protect the business:",
+  "Before the first order:",
+  "Your edge today:",
+  "Keep the session clean:",
+  "Capital comes first:",
+  "One operating rule:",
+  "Trade with evidence:",
+  "Slow the decision:",
+  "Run the plan:",
+  "Stay inside the rails:",
+  "Make patience visible:",
+  "Keep control:",
+  "Choose repeatability:",
+  "Think like the owner:",
+  "Reduce the noise:",
+  "Defend tomorrow:",
+  "Earn the next trade:",
+];
+
+const ES_PUSH_LEADS = [
+  "Protege el negocio:",
+  "Antes de la primera orden:",
+  "Tu edge de hoy:",
+  "Mantén limpia la sesión:",
+  "El capital va primero:",
+  "Una regla operativa:",
+  "Opera con evidencia:",
+  "Baja la velocidad:",
+  "Ejecuta el plan:",
+  "Quédate dentro de los límites:",
+  "Haz visible la paciencia:",
+  "Mantén el control:",
+  "Elige repetición:",
+  "Piensa como dueño:",
+  "Reduce el ruido:",
+  "Protege mañana:",
+  "Gánate el próximo trade:",
+];
+
+const EN_PUSH_ACTIONS = [
+  "wait for confirmation before entry",
+  "write the dollar risk first",
+  "skip anything outside the playbook",
+  "honor the daily loss limit",
+  "name the invalidation before entry",
+  "use the checklist before conviction",
+  "pause after every loss",
+  "pause after every win",
+  "keep size inside the plan",
+  "take only the clearest setup",
+  "separate opportunity from permission",
+  "review open risk before adding exposure",
+  "let cash remain a valid position",
+  "document the reason for the trade",
+  "stop when the business rule says stop",
+  "trade only what you can explain",
+  "reduce size when focus is scattered",
+  "protect the weekly objective",
+  "do not chase a missed move",
+  "keep emotion slower than execution",
+  "confirm setup, timing, and risk",
+  "make evidence stronger than urgency",
+  "finish one decision before the next",
+];
+
+const ES_PUSH_ACTIONS = [
+  "espera confirmación antes de entrar",
+  "escribe primero el riesgo en dólares",
+  "descarta lo que esté fuera del playbook",
+  "respeta la pérdida máxima diaria",
+  "define la invalidación antes de entrar",
+  "usa el checklist antes de la convicción",
+  "pausa después de cada pérdida",
+  "pausa después de cada ganancia",
+  "mantén el tamaño dentro del plan",
+  "toma solo el setup más claro",
+  "separa oportunidad de permiso",
+  "revisa el riesgo antes de añadir exposición",
+  "recuerda que cash también es posición",
+  "documenta la razón del trade",
+  "detente cuando lo diga la regla",
+  "opera solo lo que puedas explicar",
+  "reduce tamaño si pierdes enfoque",
+  "protege el objetivo semanal",
+  "no persigas un movimiento perdido",
+  "mantén la emoción fuera de la ejecución",
+  "confirma setup, timing y riesgo",
+  "haz que la evidencia supere la urgencia",
+  "termina una decisión antes de la próxima",
+];
+
+const EN_PUSH_CHECKPOINTS = [
+  "log it at close",
+  "protect the next session",
+  "one clean decision at a time",
+  "no exceptions today",
+  "measure process, not drama",
+  "make the rule auditable",
+  "keep the capital available",
+  "let the journal prove it",
+  "finish with honest data",
+  "repeat what works",
+  "interrupt the first impulse",
+  "review before resizing",
+  "leave evidence for tomorrow",
+  "protect the operator's pace",
+  "clarity before speed",
+  "discipline before upside",
+  "one plan, one standard",
+  "control what is controllable",
+  "close the loop today",
+];
+
+const ES_PUSH_CHECKPOINTS = [
+  "regístralo al cerrar",
+  "protege la próxima sesión",
+  "una decisión limpia a la vez",
+  "sin excepciones hoy",
+  "mide proceso, no drama",
+  "haz auditable la regla",
+  "mantén disponible el capital",
+  "deja que el journal lo pruebe",
+  "termina con data honesta",
+  "repite lo que funciona",
+  "interrumpe el primer impulso",
+  "revisa antes de subir tamaño",
+  "deja evidencia para mañana",
+  "protege el ritmo del operador",
+  "claridad antes que velocidad",
+  "disciplina antes que upside",
+  "un plan, un estándar",
+  "controla lo controlable",
+  "cierra el ciclo hoy",
+];
+
 function item<T>(items: T[], dayOfYear: number, multiplier: number, offset = 0): T {
   const day = Number.isFinite(dayOfYear) ? Math.max(1, Math.min(366, Math.floor(dayOfYear))) : 1;
   return items[((day - 1) * multiplier + offset) % items.length];
@@ -200,6 +361,71 @@ function item<T>(items: T[], dayOfYear: number, multiplier: number, offset = 0):
 
 export function normalizeMotivationLocale(locale: string | null | undefined): MotivationLocale {
   return String(locale || "").toLowerCase().startsWith("es") ? "es" : "en";
+}
+
+function normalizeDateKey(value: Date | string | number) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = value instanceof Date ? value : new Date(value);
+  const safe = Number.isNaN(parsed.getTime()) ? new Date(0) : parsed;
+  return `${safe.getUTCFullYear()}-${String(safe.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    safe.getUTCDate()
+  ).padStart(2, "0")}`;
+}
+
+function dailySequence(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return Math.max(0, Math.floor(Date.UTC(year, month - 1, day) / 86_400_000));
+}
+
+function shortenPushBody(value: string, max = 140) {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (text.length <= max) return text;
+  const candidate = text.slice(0, max - 1);
+  const boundary = candidate.lastIndexOf(" ");
+  return `${candidate.slice(0, Math.max(boundary, max - 18)).replace(/[,:;.!?]+$/, "")}…`;
+}
+
+function pushDateLabel(dateKey: string, lang: MotivationLocale) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return new Intl.DateTimeFormat(lang === "es" ? "es-PR" : "en-US", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  })
+    .format(date)
+    .replace(/\./g, "");
+}
+
+/**
+ * Compact phone copy. The visible date makes every day's notification unique,
+ * while the mixed-radix sequence rotates the coaching instruction for more than a century.
+ */
+export function buildDailyPushMotivationMessage(
+  date: Date | string | number,
+  locale: string | null | undefined
+): DailyPushMotivationCopy {
+  const lang = normalizeMotivationLocale(locale);
+  const dateKey = normalizeDateKey(date);
+  const sequence = dailySequence(dateKey);
+  const titles = lang === "es" ? ES_PUSH_TITLES : EN_PUSH_TITLES;
+  const leads = lang === "es" ? ES_PUSH_LEADS : EN_PUSH_LEADS;
+  const actions = lang === "es" ? ES_PUSH_ACTIONS : EN_PUSH_ACTIONS;
+  const checkpoints = lang === "es" ? ES_PUSH_CHECKPOINTS : EN_PUSH_CHECKPOINTS;
+  const title = `${titles[sequence % titles.length]} · ${pushDateLabel(dateKey, lang)}`;
+  const lead = leads[Math.floor(sequence / titles.length) % leads.length];
+  const action = actions[Math.floor(sequence / (titles.length * leads.length)) % actions.length];
+  const checkpoint = checkpoints[
+    Math.floor(sequence / (titles.length * leads.length * actions.length)) % checkpoints.length
+  ];
+
+  return {
+    title,
+    body: shortenPushBody(`${lead} ${action}; ${checkpoint}.`),
+    dateKey,
+    sequence,
+  };
 }
 
 export function buildAnnualMotivationMessage(

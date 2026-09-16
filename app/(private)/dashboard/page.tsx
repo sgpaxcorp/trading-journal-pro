@@ -63,6 +63,10 @@ type DashboardCoachActionPlan = {
   ruleToAdd?: string;
   ruleToRemove?: string;
   checkpointFocus?: string;
+  neuroPattern?: string;
+  neuroEvidence?: string;
+  neuroAction?: string;
+  neuroSuccessCheck?: string;
 };
 
 type DashboardCoachAudit = {
@@ -1283,14 +1287,40 @@ export default function DashboardPage() {
       .filter(Boolean) as Array<{ date: string; pnl: number; neuro: any }>;
     return buildNeuroMemory(sessions, isEs ? "es" : "en");
   }, [entries, isEs]);
-  const dashboardNeuroMemory: NeuroMemory = neuroMemory ?? {
-    title: L("Latest Neuro read", "Última lectura Neuro"),
-    body: L(
-      "Your latest AI behavior read will appear here after a Neuro-tagged execution record.",
-      "Tu lectura de comportamiento con IA aparecerá aquí después de un registro de ejecución con Neuro Layer."
-    ),
-    kind: "strength",
-  };
+  const dashboardNeuroMemory = useMemo<NeuroMemory>(() => {
+    const fallback: NeuroMemory = {
+      title: isEs ? "Última lectura Neuro" : "Latest Neuro read",
+      body: isEs
+        ? "Completa el Neuro Layer de una sesión para detectar un patrón conductual verificable."
+        : "Complete a session's Neuro Layer to detect a verifiable behavioral pattern.",
+      kind: "neutral",
+      nextAction: isEs
+        ? "Registra estado, cambios durante el trade y si seguiste el plan."
+        : "Record your state, in-trade changes, and whether you followed the plan.",
+      successCheck: isEs
+        ? "La lectura se activará cuando exista evidencia conductual suficiente."
+        : "The read will activate when enough behavioral evidence exists.",
+      generatedBy: "rules",
+    };
+    const base = neuroMemory ?? fallback;
+    const ai = coachReminder?.actionPlan;
+    const values = [ai?.neuroPattern, ai?.neuroEvidence, ai?.neuroAction, ai?.neuroSuccessCheck]
+      .map((value) => String(value || "").trim());
+    const insufficientMarkers = ["insufficient data", "data insuficiente", "evidencia insuficiente"];
+    const hasAiNeuro = values.some(
+      (value) => value && !insufficientMarkers.some((marker) => value.toLowerCase().includes(marker))
+    );
+
+    if (!hasAiNeuro) return base;
+    return {
+      ...base,
+      body: values[0] || base.body,
+      evidence: values[1] || base.evidence,
+      nextAction: values[2] || base.nextAction,
+      successCheck: values[3] || base.successCheck,
+      generatedBy: "ai",
+    };
+  }, [coachReminder?.actionPlan, isEs, neuroMemory]);
 
   // Rolling day for actions and internal daily-goal calculations
   const [rollingTodayStr, setRollingTodayStr] = useState(() => formatDateYYYYMMDD(new Date()));
@@ -4789,21 +4819,54 @@ export default function DashboardPage() {
                     <p className="mt-2 text-[12px] leading-relaxed text-slate-200/90">
                       {dashboardNeuroMemory.body}
                     </p>
+                    {dashboardNeuroMemory.evidence ? (
+                      <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/35 px-3 py-2">
+                        <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                          {L("Evidence", "Evidencia")}
+                        </p>
+                        <p className="mt-1 text-[11px] leading-relaxed text-slate-200">
+                          {dashboardNeuroMemory.evidence}
+                        </p>
+                      </div>
+                    ) : null}
+                    {dashboardNeuroMemory.nextAction ? (
+                      <div className="mt-2 rounded-lg border border-emerald-300/20 bg-emerald-400/8 px-3 py-2">
+                        <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-emerald-200/80">
+                          {L("Coach instruction", "Instrucción del coach")}
+                        </p>
+                        <p className="mt-1 text-[11px] font-medium leading-relaxed text-emerald-50">
+                          {dashboardNeuroMemory.nextAction}
+                        </p>
+                      </div>
+                    ) : null}
+                    {dashboardNeuroMemory.successCheck ? (
+                      <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
+                        <span className="font-semibold text-slate-300">{L("Measurement", "Medición")}:</span>{" "}
+                        {dashboardNeuroMemory.successCheck}
+                      </p>
+                    ) : null}
                   </div>
-                  <div
-                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
-                      dashboardNeuroMemory.kind === "risk"
-                        ? "border border-amber-300/40 bg-amber-400/10 text-amber-100"
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <div
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                        dashboardNeuroMemory.kind === "risk"
+                          ? "border border-amber-300/40 bg-amber-400/10 text-amber-100"
+                          : dashboardNeuroMemory.kind === "strength"
+                            ? "border border-cyan-300/40 bg-cyan-400/10 text-cyan-100"
+                            : "border border-slate-600 bg-slate-800 text-slate-200"
+                      }`}
+                    >
+                      {dashboardNeuroMemory.kind === "risk"
+                        ? L("Pattern", "Patrón")
                         : dashboardNeuroMemory.kind === "strength"
-                          ? "border border-cyan-300/40 bg-cyan-400/10 text-cyan-100"
-                          : "border border-slate-600 bg-slate-800 text-slate-200"
-                    }`}
-                  >
-                    {dashboardNeuroMemory.kind === "risk"
-                      ? L("Pattern", "Patrón")
-                      : dashboardNeuroMemory.kind === "strength"
-                        ? L("Strength", "Fortaleza")
-                        : L("Memory", "Memoria")}
+                          ? L("Strength", "Fortaleza")
+                          : L("Memory", "Memoria")}
+                    </div>
+                    <span className="text-[9px] uppercase tracking-wide text-slate-500">
+                      {dashboardNeuroMemory.generatedBy === "ai"
+                        ? L("AI coaching", "Coaching IA")
+                        : L("Behavior model", "Modelo conductual")}
+                    </span>
                   </div>
                 </div>
               </div>

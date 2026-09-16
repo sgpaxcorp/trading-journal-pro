@@ -49,4 +49,18 @@ describe("AI cost accounting", () => {
     expect(result.pricingSnapshot.matched).toBe(false);
     expect(result.estimatedCostUsd).toBe(0);
   });
+
+  it("uses the published GPT-6 Astra standard short-context rate", () => {
+    const result = estimateAiUsageCost({
+      model: "gpt-6-astra",
+      usage: {
+        input_tokens: 100_000,
+        output_tokens: 10_000,
+        input_tokens_details: { cached_tokens: 25_000 },
+      },
+    });
+
+    expect(result.pricingSnapshot.pricingKey).toBe("gpt-6-astra");
+    expect(result.estimatedCostUsd).toBeCloseTo(1.275, 8);
+  });
 });

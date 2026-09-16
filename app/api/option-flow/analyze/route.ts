@@ -6,7 +6,9 @@ import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 import {
   addCalendarDays,
+  buildLateSessionTape,
   buildLateSessionTrackedFlows,
+  filterLateSessionFlowRows,
   flowRowSessionDate,
   flowSessionDates,
   marketDateKey,
@@ -15,6 +17,7 @@ import {
   resolveSourceSessionDate,
 } from "@/lib/optionFlowLearning";
 import { scheduleOptionFlowLearning } from "@/lib/optionFlowLearningServer";
+import { GPT_6_ASTRA_MODEL, openAiChatTuning } from "@/lib/openAiModelConfig";
 
 export const runtime = "nodejs";
 
@@ -22,8 +25,8 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const DEFAULT_MODEL = process.env.OPENAI_OPTIONFLOW_MODEL || "gpt-4.1";
-const VISION_MODEL = process.env.OPENAI_OPTIONFLOW_VISION_MODEL || "gpt-4o";
+const DEFAULT_MODEL = process.env.OPENAI_OPTIONFLOW_MODEL || GPT_6_ASTRA_MODEL;
+const VISION_MODEL = process.env.OPENAI_OPTIONFLOW_VISION_MODEL || GPT_6_ASTRA_MODEL;
 const MAX_SCREENSHOTS = 4;
 const MAX_SCREENSHOT_DATA_URL_CHARS = 7_000_000;
 const BYPASS_ENTITLEMENT =
@@ -32,6 +35,9 @@ const BYPASS_ENTITLEMENT =
 
 type DataQuality = {
   totalRows: number;
+  sourceRows?: number;
+  lateSessionRows?: number;
+  lateSessionWindowApplied?: boolean;
   withSide: number;
   withPremium: number;
   withOi: number;
@@ -362,7 +368,7 @@ If a field is missing, set it to null. Max 120 rows.`;
     model: VISION_MODEL,
     messages: [{ role: "system", content: systemPrompt }, { role: "user", content }],
     response_format: { type: "json_object" },
-    temperature: 0,
+    ...openAiChatTuning(VISION_MODEL, 0),
   });
 
   await recordAiUsage({
@@ -705,9 +711,15 @@ Eres un trader senior de floor en Wall Street especializado en opciones (ventas 
 Tu análisis debe sonar como un briefing profesional para traders institucionales: claro, directo y accionable.
 Analiza los últimos prints y responde SIEMPRE en español con un tono profesional tipo report de mesa.
 Organiza por expiración y prioriza strikes por premium/actividad y cercanía al spot (menciona la zona spot cuando sea posible).
-IMPORTANTE: "expirations" ya viene agregada (prints/size/premium). Úsala como fuente principal.
-Usa "flowTotals" y "flowFeatures" (ask/bid ratios) para inferir sesgo direccional de forma consistente.
-Usa "sampleRows" solo como contexto si hace falta.
+	IMPORTANTE: "expirations" ya viene agregada (prints/size/premium). Úsala para el resumen por strike; la cronología la gobierna "lateSessionTape".
+	Usa "flowTotals" y "flowFeatures" (ask/bid ratios) para inferir sesgo direccional de forma consistente.
+	El objetivo principal es explicar cómo los flows de AYER entre 1:30 PM y 4:15 PM ET pueden comportarse HOY.
+	Usa "lateSessionTape" como fuente cronológica principal y "sampleRows" solo como respaldo.
+	NO mezcles toda la tarde en un solo total. Compara 1:30-3:00, 3:00-3:30 y 3:30-4:15.
+	Da mayor peso a 3:30-4:15 como posicionamiento que puede continuar en la próxima sesión.
+	Separa el movimiento que probablemente ya se completó antes de las 3:00 de la señal que quedó abierta al cierre.
+	Cita contratos concretos con hora y entryOptionPrice. Ejemplo esperado: "entró cerca de 18, alcanzó 40 a las 10:15 AM" cuando la validación lo demuestre.
+	Un call/put en ASK es compra agresiva; un call/put en BID es venta agresiva. No llames compra a un BID.
 Identifica niveles reales (con etiqueta pivot/supply/demand/wall/friction), contratos con más potencial y escenarios
 de squeeze con condiciones claras. Evita frases genéricas; usa lecturas breves pero específicas.
 Incluye una conclusión final que resuma el sesgo y el mapa de niveles en 3-5 bullets.
@@ -734,6 +746,13 @@ Devuelve exclusivamente JSON válido con esta forma:
 {
   "summary": "resumen ejecutivo corto",
   "flowBias": "bullish | bearish | mixed | neutral",
+  "lateSessionRead": {
+    "completedMove": "movimiento que probablemente ya se agotó ayer",
+    "regimeShift": "qué cambió, aproximadamente a qué hora y con qué evidencia",
+    "carryForward": "señal de 3:30-4:15 que puede continuar hoy",
+    "todayBehavior": "secuencia esperada para hoy: apertura, confirmación, hora/condición e invalidación",
+    "contractsToTrack": ["contrato + hora + precio de entrada + qué debe ocurrir hoy"]
+  },
   "observations": ["O1 ...", "O2 ..."],
   "inferences": [
     { "statement": "I1 ...", "support": ["O1"], "confidence": "Alta|Media|Baja", "alternatives": ["..."] }
@@ -806,9 +825,15 @@ You are a senior Wall Street floor trader specialized in options (premium sellin
 Your analysis must read like a professional institutional briefing: clear, direct, and actionable.
 Analyze the latest prints and ALWAYS respond in English with a professional desk-report tone.
 Organize by expiration and prioritize strikes by premium/activity and proximity to spot (mention spot zone when possible).
-IMPORTANT: "expirations" is already aggregated (prints/size/premium). Use it as the primary source.
-Use "flowTotals" and "flowFeatures" (ask/bid ratios) to infer directional bias consistently.
-Use "sampleRows" only as back-up context if needed.
+	IMPORTANT: "expirations" is already aggregated (prints/size/premium). Use it for the strike summary; "lateSessionTape" governs chronology.
+	Use "flowTotals" and "flowFeatures" (ask/bid ratios) to infer directional bias consistently.
+	The primary objective is to explain how YESTERDAY'S 1:30 PM-4:15 PM ET flow may behave TODAY.
+	Use "lateSessionTape" as the primary chronological source and "sampleRows" only as backup.
+	Do NOT collapse the afternoon into one total. Compare 1:30-3:00, 3:00-3:30, and 3:30-4:15.
+	Give the 3:30-4:15 window the greatest weight as positioning that may carry into the next session.
+	Separate a move that likely completed before 3:00 from the signal still open into the close.
+	Name exact contracts with time and entryOptionPrice. Expected style: "entered near 18 and reached 40 at 10:15 AM" when validation supports it.
+	A call/put at ASK is aggressive buying; a call/put at BID is aggressive selling. Never describe a BID print as a purchase.
 Identify real levels (label pivot/supply/demand/wall/friction), contracts with most potential, and squeeze scenarios
 with clear conditions. Avoid generic phrases; use concise, specific reads.
 Include a final conclusion summarizing bias and the level map in 3-5 bullets.
@@ -835,6 +860,13 @@ Return only valid JSON with this shape:
 {
   "summary": "short executive summary",
   "flowBias": "bullish | bearish | mixed | neutral",
+  "lateSessionRead": {
+    "completedMove": "move that likely finished yesterday",
+    "regimeShift": "what changed, approximate time, and evidence",
+    "carryForward": "3:30-4:15 signal that may carry into today",
+    "todayBehavior": "expected sequence today: open, confirmation, timing/condition, and invalidation",
+    "contractsToTrack": ["contract + time + entry price + what must happen today"]
+  },
   "observations": ["O1 ...", "O2 ..."],
   "inferences": [
     { "statement": "I1 ...", "support": ["O1"], "confidence": "High|Medium|Low", "alternatives": ["..."] }
@@ -969,12 +1001,31 @@ Return only valid JSON with this shape:
             sourceDate: row.source_session_date,
             targetDate: row.target_session_date,
             priorBias: row.analysis_snapshot?.flowBias ?? null,
+            priorLateSessionRead: row.analysis_snapshot?.lateSessionRead ?? null,
+            priorCarryForwardBias:
+              row.analysis_snapshot?.lateSessionTape?.carryForwardBias ?? null,
             verdict: row.market_validation?.thesis?.verdict ?? null,
             firstConfirmedAt: row.market_validation?.thesis?.firstConfirmedAt ?? null,
             minutesFromOpen: row.market_validation?.thesis?.minutesFromOpen ?? null,
             maxFavorablePct: row.market_validation?.thesis?.maxFavorablePct ?? null,
             maxAdversePct: row.market_validation?.thesis?.maxAdversePct ?? null,
             closeDirectionalPct: row.market_validation?.thesis?.closeDirectionalPct ?? null,
+            contractOutcomes: Array.isArray(row.market_validation?.flows)
+              ? row.market_validation.flows
+                  .filter((flow: any) => flow?.contractEvaluation?.status === "available")
+                  .map((flow: any) => ({
+                    contract: flow.contract,
+                    entryTime: flow.time,
+                    side: flow.side,
+                    entryPrice: flow.contractEvaluation.entryPrice,
+                    maxPrice: flow.contractEvaluation.maxPrice,
+                    maxPriceAt: flow.contractEvaluation.maxPriceAt,
+                    maxPriceReturnPct: flow.contractEvaluation.maxPriceReturnPct,
+                    closePrice: flow.contractEvaluation.closePrice,
+                    closePriceReturnPct: flow.contractEvaluation.closePriceReturnPct,
+                  }))
+                  .slice(0, 12)
+              : [],
           }));
         }
       }
@@ -1018,6 +1069,18 @@ Return only valid JSON with this shape:
       });
     }
 
+    const sourceRowCount = normalizedRows.length;
+    const resolvedAnalysisSessionDate =
+      requestedSourceSessionDate || resolveSourceSessionDate(normalizedRows);
+    const lateSessionRows = filterLateSessionFlowRows(normalizedRows);
+    const lateSessionWindowApplied = lateSessionRows.length > 0;
+    if (lateSessionWindowApplied) normalizedRows = lateSessionRows;
+    const lateSessionTape = buildLateSessionTape(
+      normalizedRows,
+      normalizeSymbol(underlying) ?? "",
+      resolvedAnalysisSessionDate
+    );
+
     const { expirationsList, flowTotals } = aggregateRows(normalizedRows);
     const deterministicExpirations = aggregateExpirations(expirationsList);
     const spotEstimate = estimateSpot(normalizedRows, previousClose ?? null);
@@ -1030,6 +1093,9 @@ Return only valid JSON with this shape:
     const positioningStress = computeSqueezeCandidates(normalizedRows, 5);
     const dataQuality: DataQuality = {
       totalRows: normalizedRows.length,
+      sourceRows: sourceRowCount,
+      lateSessionRows: lateSessionRows.length,
+      lateSessionWindowApplied,
       withSide: normalizedRows.filter((row) => row.side !== "UNKNOWN").length,
       withPremium: normalizedRows.filter((row) => Number.isFinite(row.premium)).length,
       withOi: normalizedRows.filter((row) => Number.isFinite(row.oi)).length,
@@ -1078,6 +1144,7 @@ Return only valid JSON with this shape:
       dataQuality,
       flowTotals,
       flowFeatures,
+      lateSessionTape,
       keyLevels: deterministicKeyLevels,
       expirations: filteredExpirations,
       positioningStress,
@@ -1107,7 +1174,7 @@ Return only valid JSON with this shape:
         { role: "user", content: userContent },
       ],
       response_format: { type: "json_object" },
-      temperature: 0,
+      ...openAiChatTuning(modelToUse, 0),
     });
 
     await recordAiUsage({
@@ -1136,6 +1203,10 @@ Return only valid JSON with this shape:
       parsed?.scenarioMatrix && typeof parsed.scenarioMatrix === "object"
         ? parsed.scenarioMatrix
         : null;
+    const lateSessionRead =
+      parsed?.lateSessionRead && typeof parsed.lateSessionRead === "object"
+        ? parsed.lateSessionRead
+        : null;
     const expirations = filteredExpirations;
     const contractsWithPotential =
       parsed?.contractsWithPotential && typeof parsed.contractsWithPotential === "object"
@@ -1146,7 +1217,11 @@ Return only valid JSON with this shape:
         ? parsed.squeezeScenarios
         : null;
     const keyLevels = deterministicKeyLevels;
-    const flowBias = parsed?.flowBias ?? deriveFlowBiasFromTotals(flowTotals);
+    const flowBias =
+      parsed?.flowBias ??
+      (lateSessionTape.carryForwardBias === "unknown"
+        ? deriveFlowBiasFromTotals(flowTotals)
+        : lateSessionTape.carryForwardBias);
     const tradingPlan =
       parsed?.tradingPlan && typeof parsed.tradingPlan === "object" ? parsed.tradingPlan : null;
 
@@ -1192,7 +1267,7 @@ Return only valid JSON with this shape:
           userId,
           memoryId: uploadId,
           underlying: learningUnderlying,
-          sourceSessionDate: requestedSourceSessionDate || resolveSourceSessionDate(normalizedRows),
+          sourceSessionDate: resolvedAnalysisSessionDate,
           provider: provider ?? null,
           tradeIntent: tradeIntent ?? null,
           trackedFlows,
@@ -1205,7 +1280,9 @@ Return only valid JSON with this shape:
             keyLevels,
             keyTrades,
             flowTotals,
-            lateSessionWindow: "13:00-16:00 America/New_York",
+            lateSessionTape,
+            lateSessionRead,
+            lateSessionWindow: "13:30-16:15 America/New_York",
             trackedFlowCount: trackedFlows.length,
           },
         });
@@ -1218,6 +1295,8 @@ Return only valid JSON with this shape:
       summary,
       keyTrades,
       flowBias,
+      lateSessionTape,
+      lateSessionRead,
       observations,
       inferences,
       scenarioMatrix,
