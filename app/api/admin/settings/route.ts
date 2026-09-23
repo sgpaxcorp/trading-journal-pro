@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export async function GET(req: NextRequest) {
   try {
-    const admin = await requireAdminUser(req, { action: "settings:read", limit: 120, windowMs: 60_000 });
+    const admin = await requireAdminUser(req, { action: "settings:read", permission: "communications.read", limit: 120, windowMs: 60_000 });
     if (!admin.ok) return admin.response;
 
     const { data, error } = await supabaseAdmin
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const admin = await requireAdminUser(req, { action: "settings:write", limit: 20, windowMs: 10 * 60_000 });
+    const admin = await requireAdminUser(req, { action: "settings:write", permission: "communications.write", limit: 20, windowMs: 10 * 60_000 });
     if (!admin.ok) return admin.response;
 
     const body = await req.json().catch(() => ({}));

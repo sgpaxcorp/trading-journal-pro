@@ -41,13 +41,61 @@ describe("parseTosStatementRows", () => {
       dates: ["2026-09-08"],
       fills: 4,
       closedTrades: 2,
+      openPositions: 0,
+      realizedGrossPnl: 22,
+      openPnlDay: null,
       grossPnl: 22,
       commissions: 2.6,
       fees: 0.05,
       netPnl: 19.35,
+      startingBalance: 8.21,
+      endingCashBalance: 1027.56,
+      endingNetLiquidatingValue: null,
+      accountNetChange: null,
       reportedGrossPnl: 22,
       reconciled: true,
     });
     expect(result.transactions.some((row) => row.description.includes("Futures cash"))).toBe(false);
+  });
+
+  it("includes the broker P/L Day for an option that expires without a closing fill", () => {
+    const expirationRows = [
+      ["Account Statement"],
+      ["Cash Balance"],
+      ["DATE", "TIME", "TYPE", "REF #", "DESCRIPTION", "Misc Fees", "Commissions & Fees", "AMOUNT", "BALANCE"],
+      ["9/22/26", "01:00:00", "BAL", "", "Cash balance at the start of business day", "", "", "", "256.73"],
+      ["9/22/26", "09:30:20", "TRD", '="1008009682186"', "BOT +1 SPX 100 (Weeklys) 22 SEP 26 7800 CALL @2.25 CBOE", "-0.57", "-0.65", "-225.00", "30.51"],
+      ["9/22/26", "09:31:19", "TRD", '="1008009682296"', "SOLD -1 SPX 100 (Weeklys) 22 SEP 26 7800 CALL @3.30 CBOE", "-0.57", "-0.65", "330.00", "359.29"],
+      ["9/22/26", "09:36:18", "TRD", '="1008009683263"', "BOT +1 SPX 100 (Weeklys) 22 SEP 26 7805 CALL @3.40 CBOE", "-0.57", "-0.65", "-340.00", "18.07"],
+      ["Futures Statements"],
+      ["Profits and Losses"],
+      ["Symbol", "Description", "P/L Open", "P/L %", "P/L Day", "P/L YTD", "P/L Diff", "Margin Req", "Close Value"],
+      ["SPX", "S & P 500 INDEX", "($339.99)", "-100.00%", "($339.99)", "($5,969.99)", "$0.00", "$0.00", "$0.01"],
+      ["", "OVERALL TOTALS", "($339.99)", "-100.00%", "($339.99)", "($6,074.99)", "$0.00", "$0.00", "$0.01"],
+      ["Account Summary"],
+      ["Net Liquidating Value", "$18.08"],
+    ];
+
+    const result = parseTosStatementRows(expirationRows);
+
+    expect(result.summary).toMatchObject({
+      dates: ["2026-09-22"],
+      fills: 3,
+      closedTrades: 1,
+      openPositions: 1,
+      realizedGrossPnl: 105,
+      openPnlDay: -339.99,
+      grossPnl: -234.99,
+      commissions: 1.95,
+      fees: 1.71,
+      netPnl: -238.65,
+      startingBalance: 256.73,
+      endingCashBalance: 18.07,
+      endingNetLiquidatingValue: 18.08,
+      accountNetChange: -238.65,
+      reportedGrossPnl: -339.99,
+      reconciled: true,
+    });
+    expect(result.warnings).toEqual([]);
   });
 });

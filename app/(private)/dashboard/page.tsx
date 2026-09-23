@@ -17,6 +17,7 @@ import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { upsertDailySnapshot } from "@/lib/snapshotSupabase";
 import { getJournalTradesForDates } from "@/lib/journalTradesSupabase";
 import { parseNotes, type TradesPayload } from "@/lib/journalNotes";
+import { isNotTradedJournalEntry } from "@/lib/journalSessionStatus";
 import { createAlertRule } from "@/lib/alertsSupabase";
 import { buildNeuroMemory, computeNeuroSummary, normalizeNeuroLayer, type NeuroMemory } from "@/lib/neuroLayer";
 
@@ -944,7 +945,7 @@ function buildMonthCalendar(
       isToday = dateStr === todayStrLocal;
       holiday = dateStr ? holidayMap.get(dateStr) ?? null : null;
 
-      if (entry) {
+      if (entry && !isNotTradedJournalEntry(entry)) {
         const rawPnl = (entry as any).pnl;
         const pnl = typeof rawPnl === "number" ? rawPnl : Number(rawPnl) || 0;
         weeks[weekIndex].pnl += pnl;
@@ -960,7 +961,7 @@ function buildMonthCalendar(
 }
 
 function calcGreenStreak(entries: JournalEntry[]): number {
-  const sorted = [...entries].sort((a, b) =>
+  const sorted = entries.filter((entry) => !isNotTradedJournalEntry(entry)).sort((a, b) =>
     String((a as any).date).localeCompare(String((b as any).date))
   );
   let streak = 0;
@@ -987,7 +988,11 @@ function calcTradingDayStats(entries: JournalEntry[], holidaySet: Set<string>) {
 
   const tradedDatesSet = new Set(
     entries
-      .filter((e) => new Date(String((e as any).date)).getFullYear() === year)
+      .filter(
+        (e) =>
+          !isNotTradedJournalEntry(e) &&
+          new Date(String((e as any).date)).getFullYear() === year
+      )
       .map((e) => String((e as any).date).slice(0, 10))
   );
 
@@ -3544,12 +3549,16 @@ export default function DashboardPage() {
       const hasTodaySession = filteredEntries.some(
         (entry) => String((entry as any)?.date ?? "").slice(0, 10) === sessionDateStr
       );
+      const todayEntry = filteredEntries.find(
+        (entry) => String((entry as any)?.date ?? "").slice(0, 10) === sessionDateStr
+      );
       const dailyGoalStatus = resolveDailyGoalStatus({
         hasPlan: Boolean(plan),
         isTradingDay: dailyCalcs.isTradingDay,
         expectedUsd: dailyCalcs.expectedSessionUSD,
         actualUsd: dailyCalcs.actualSessionUSD,
         hasSession: hasTodaySession,
+        isNotTraded: isNotTradedJournalEntry(todayEntry),
       });
       const dailyGoalStatusView = {
         not_configured: {
@@ -3559,6 +3568,10 @@ export default function DashboardPage() {
         paused: {
           label: L("Goal paused", "Meta pausada"),
           className: "border-cyan-300/30 bg-cyan-400/10 text-cyan-100",
+        },
+        not_traded: {
+          label: L("Not Traded", "No operado"),
+          className: "border-violet-300/30 bg-violet-400/10 text-violet-100",
         },
         no_activity: {
           label: L("No activity yet", "Sin actividad todavía"),
@@ -4122,6 +4135,7 @@ export default function DashboardPage() {
         selectedDate && entries.length
           ? entries.find((e) => String((e as any).date).slice(0, 10) === selectedDate)
           : null;
+      const selectedNotTraded = isNotTradedJournalEntry(selectedEntry);
       const selectedTrades = selectedDate ? monthTrades[selectedDate] : null;
       const selectedNotes = parseNotes(selectedEntry?.notes ?? "");
       const premarketText = stripHtml(String(selectedNotes?.premarket ?? ""));
@@ -4176,12 +4190,14 @@ export default function DashboardPage() {
                   const hasDate = cell.dateStr !== null && cell.dayNumber !== null;
                   const rawPnl = (cell.entry as any)?.pnl ?? 0;
                   const pnl = typeof rawPnl === "number" ? rawPnl : Number(rawPnl) || 0;
+                  const isNotTraded = isNotTradedJournalEntry(cell.entry);
                   const isHolidayCell = !!cell.holiday;
                   const holidayLabel = cell.holiday?.label ?? null;
 
                   let bg = "bg-slate-950/90 border-slate-800 text-slate-600";
                   if (hasDate && cell.entry) {
-                    if (pnl > 0) bg = "bg-emerald-400/90 border-emerald-300 text-slate-950";
+                    if (isNotTraded) bg = "bg-violet-400/12 border-violet-300/50 text-violet-100";
+                    else if (pnl > 0) bg = "bg-emerald-400/90 border-emerald-300 text-slate-950";
                     else if (pnl < 0) bg = "bg-sky-500/90 border-sky-300 text-slate-950";
                     else bg = "bg-slate-800/90 border-slate-700 text-slate-200";
                   } else if (hasDate && isHolidayCell) {
@@ -4212,7 +4228,13 @@ export default function DashboardPage() {
                       {cell.entry ? (
                         <div className="mt-1">
                           <p className="text-[16px] font-semibold leading-none">
-                            {pnl > 0 ? `+$${pnl.toFixed(0)}` : pnl < 0 ? `-$${Math.abs(pnl).toFixed(0)}` : "$0"}
+                            {isNotTraded
+                              ? L("Not Traded", "No operado")
+                              : pnl > 0
+                                ? `+$${pnl.toFixed(0)}`
+                                : pnl < 0
+                                  ? `-$${Math.abs(pnl).toFixed(0)}`
+                                  : "$0"}
                           </p>
                           <button
                             type="button"
@@ -4278,6 +4300,16 @@ export default function DashboardPage() {
                   "Haz clic en un día del calendario para ver notas y entradas/salidas."
                 )}
               </p>
+            ) : selectedNotTraded ? (
+              <div className="mt-3 rounded-xl border border-violet-300/35 bg-violet-400/10 px-4 py-3 text-sm text-violet-100">
+                <p className="font-semibold">{L("Not Traded", "No operado")}</p>
+                <p className="mt-1 text-xs text-violet-100/75">
+                  {L(
+                    "This date was explicitly recorded as a day without trading. It is not a $0 trading session.",
+                    "Esta fecha se registró explícitamente como un día sin operar. No es una sesión de trading de $0."
+                  )}
+                </p>
+              </div>
             ) : (
               <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-200">
                 <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
@@ -4307,7 +4339,7 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {selectedDate ? (
+            {selectedDate && !selectedNotTraded ? (
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-200">
                 <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                   <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">

@@ -62,6 +62,7 @@ function databaseErrorResponse(error: any) {
 export async function GET(req: NextRequest) {
   const admin = await requireAdminUser(req, {
     action: "emergency-portfolio:read",
+    permission: "operations.read",
     limit: 60,
     windowMs: 60_000,
   });
@@ -90,6 +91,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const admin = await requireAdminUser(req, {
     action: "emergency-portfolio:write",
+    permission: "operations.write",
     limit: 10,
     windowMs: 10 * 60_000,
   });

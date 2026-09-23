@@ -1061,7 +1061,11 @@ export async function POST(req: NextRequest) {
         balance: Number.isFinite(balance) ? balance : null,
         executed_at,
         row_hash,
-        raw: { row: r, detectedHeadersAtRow: parsedStatement.headerRow },
+        raw: {
+          row: r,
+          detectedHeadersAtRow: parsedStatement.headerRow,
+          statementSummary: parsedStatement.summary,
+        },
         import_batch_id: batchId,
       });
 

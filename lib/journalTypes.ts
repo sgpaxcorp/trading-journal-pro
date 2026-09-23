@@ -3,6 +3,7 @@
 export type JournalEntry = {
   date: string; // YYYY-MM-DD
   pnl: number; // P&L in USD
+  sessionStatus?: "traded" | "not_traded";
   instrument?: string;
   direction?: "long" | "short";
   entryPrice?: number;

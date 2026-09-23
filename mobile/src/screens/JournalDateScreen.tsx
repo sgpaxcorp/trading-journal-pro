@@ -43,6 +43,7 @@ type AfterTradeReview = {
 };
 
 type NotesPayload = {
+  session_status?: "traded" | "not_traded";
   premarket?: string;
   live?: string;
   post?: string;
@@ -177,6 +178,19 @@ const TAG_PREFIX = {
   after: "POST:",
   strategy: "STRAT:",
 } as const;
+
+const NOT_TRADED_JOURNAL_TAG = "NTJ:NOT_TRADED";
+
+function sessionStatusFrom(notes: NotesPayload, tags: string[]): "traded" | "not_traded" {
+  return notes.session_status === "not_traded" || tags.includes(NOT_TRADED_JOURNAL_TAG)
+    ? "not_traded"
+    : "traded";
+}
+
+function tagsForSessionStatus(tags: string[], status: "traded" | "not_traded") {
+  const withoutMarker = Array.from(new Set(tags)).filter((tag) => tag !== NOT_TRADED_JOURNAL_TAG);
+  return status === "not_traded" ? [...withoutMarker, NOT_TRADED_JOURNAL_TAG] : withoutMarker;
+}
 
 const EXIT_REASON_TAGS = [
   "Stop Loss Placed",
@@ -496,6 +510,7 @@ export function JournalDateScreen() {
   const [checklistPresets, setChecklistPresets] = useState<ChecklistSnapshot>(DEFAULT_CHECKLIST_PRESETS);
   const [checklists, setChecklists] = useState<ChecklistSnapshot>(EMPTY_CHECKLISTS);
   const [preservedTags, setPreservedTags] = useState<string[]>([]);
+  const [sessionStatus, setSessionStatus] = useState<"traded" | "not_traded">("traded");
   const [exitEvidenceTags, setExitEvidenceTags] = useState<string[]>([]);
   const [afterReview, setAfterReview] = useState<AfterTradeReview>(DEFAULT_AFTER_REVIEW);
   const [instrument, setInstrument] = useState("");
@@ -561,6 +576,7 @@ export function JournalDateScreen() {
       emotion,
       respectedPlan,
       exitEvidenceTags,
+      sessionStatus,
     }),
     [
       afterDidWellInk,
@@ -586,6 +602,7 @@ export function JournalDateScreen() {
       premarketInk,
       premarketMode,
       respectedPlan,
+      sessionStatus,
       size,
     ]
   );
@@ -685,6 +702,7 @@ export function JournalDateScreen() {
     setChecklistPresets(mergedPresets);
     setChecklists(mergeChecklistSelections(notesChecklist, tagSelections));
     setPreservedTags(rawTags.filter((tag) => !controlledTagSet.has(tag)));
+    setSessionStatus(sessionStatusFrom(parsed, rawTags));
     setExitEvidenceTags(rawTags.filter((tag) => EXIT_REASON_TAGS.includes(tag)));
     setAfterReview(normalizeAfterReview(afterReviewRaw));
     setInstrument(entry?.instrument ?? "");
@@ -841,7 +859,9 @@ export function JournalDateScreen() {
     }
   }
 
-  async function handleSave(): Promise<boolean> {
+  async function handleSave(
+    sessionStatusOverride?: "traded" | "not_traded"
+  ): Promise<boolean> {
     setSaving(true);
     setStatus(null);
     setError(null);
@@ -862,6 +882,21 @@ export function JournalDateScreen() {
         .maybeSingle();
       if (entryError) throw entryError;
       const existingNotes = parseNotes((entryData as any)?.notes ?? "");
+      const effectiveSessionStatus = sessionStatusOverride ?? sessionStatus;
+      const hasTradingActivity =
+        trades.length > 0 ||
+        [summary.net, summary.gross, summary.commissions, summary.fees].some(
+          (value) => Math.abs(Number(value ?? 0)) > 0.005
+        );
+      if (effectiveSessionStatus === "not_traded" && hasTradingActivity) {
+        throw new Error(
+          t(
+            language,
+            "This day has trades, P&L, commissions, or fees and cannot be marked Not Traded.",
+            "Este día tiene trades, P&L, comisiones o fees y no se puede marcar como No operado."
+          )
+        );
+      }
       const latestPremarketInk = await premarketFieldRef.current?.getCurrentInk();
       const latestLiveInk = await liveFieldRef.current?.getCurrentInk();
       const latestPostInk = await postFieldRef.current?.getCurrentInk();
@@ -877,7 +912,7 @@ export function JournalDateScreen() {
         if (!Number.isFinite(n)) return null;
         return n;
       };
-      const nextTags = uniqueStrings([
+      const nextTags = tagsForSessionStatus(uniqueStrings([
         ...preservedTags,
         ...exitEvidenceTags,
         ...checklists.premarket.map((item) => checklistTag(TAG_PREFIX.premarket, item)),
@@ -886,9 +921,10 @@ export function JournalDateScreen() {
         ...checklists.strategy.map((item) => checklistTag(TAG_PREFIX.strategy, item)),
         ...checklists.impulses,
         ...checklists.states,
-      ]);
+      ]), effectiveSessionStatus);
       const nextNotes = JSON.stringify({
         ...existingNotes,
+        session_status: effectiveSessionStatus,
         premarket,
         live,
         post,
@@ -921,6 +957,7 @@ export function JournalDateScreen() {
         exit_price: toNumOrNull(exitPrice),
         respected_plan: respectedPlan === null ? null : respectedPlan,
         tags: nextTags,
+        ...(effectiveSessionStatus === "not_traded" ? { pnl: 0 } : {}),
       };
 
       if (!entryData) {
@@ -939,6 +976,7 @@ export function JournalDateScreen() {
             exit_price: entryPatch.exit_price,
             respected_plan: entryPatch.respected_plan,
             tags: nextTags,
+            ...(effectiveSessionStatus === "not_traded" ? { pnl: 0 } : {}),
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           });
@@ -955,6 +993,7 @@ export function JournalDateScreen() {
       setSavedDraftSignature(
         JSON.stringify({
           ...draftSnapshot,
+          sessionStatus: effectiveSessionStatus,
           premarketInk: latestPremarketInk ?? premarketInk,
           liveInk: latestLiveInk ?? liveInk,
           postInk: latestPostInk ?? postInk,
@@ -962,7 +1001,14 @@ export function JournalDateScreen() {
           afterImproveInk: latestAfterImproveInk ?? afterImproveInk,
         })
       );
-      setStatus(t(language, "Saved", "Guardado"));
+      setSessionStatus(effectiveSessionStatus);
+      const currentControlledTags = controlledTagsForPresets(checklistPresets);
+      setPreservedTags(nextTags.filter((tag) => !currentControlledTags.has(tag)));
+      setStatus(
+        effectiveSessionStatus === "not_traded"
+          ? t(language, "Saved as Not Traded", "Guardado como No operado")
+          : t(language, "Saved", "Guardado")
+      );
       return true;
     } catch (err: any) {
       const message = err?.message ?? t(language, "Failed to save.", "No se pudo guardar.");
@@ -974,6 +1020,10 @@ export function JournalDateScreen() {
     }
   }
   saveActionRef.current = handleSave;
+
+  const handleToggleNotTraded = async () => {
+    await handleSave(sessionStatus === "not_traded" ? "traded" : "not_traded");
+  };
 
   const showUnsavedPrompt = (onContinue: () => void) => {
     if (promptOpenRef.current) return;
@@ -1579,6 +1629,46 @@ export function JournalDateScreen() {
       </View>
 
       {!loading ? (
+        <View style={[styles.notTradedPanel, sessionStatus === "not_traded" && styles.notTradedPanelActive]}>
+          <View style={styles.notTradedCopy}>
+            <Text style={styles.notTradedTitle}>
+              {sessionStatus === "not_traded"
+                ? t(language, "Not Traded", "No operado")
+                : t(language, "Did not trade today?", "¿No operaste hoy?")}
+            </Text>
+            <Text style={styles.notTradedHint}>
+              {sessionStatus === "not_traded"
+                ? t(
+                    language,
+                    "Recorded as a day without trading, not as a $0 session.",
+                    "Registrado como día sin operar, no como una sesión de $0."
+                  )
+                : t(
+                    language,
+                    "Record the decision so it appears correctly in the calendar.",
+                    "Registra la decisión para que aparezca correctamente en el calendario."
+                  )}
+            </Text>
+          </View>
+          <Pressable
+            disabled={saving}
+            onPress={() => void handleToggleNotTraded()}
+            style={({ pressed }) => [
+              styles.notTradedButton,
+              sessionStatus === "not_traded" && styles.notTradedButtonActive,
+              (pressed || saving) && styles.saveButtonDisabled,
+            ]}
+          >
+            <Text style={styles.notTradedButtonText}>
+              {sessionStatus === "not_traded"
+                ? t(language, "Undo", "Deshacer")
+                : t(language, "Mark Not Traded", "Marcar No operado")}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {!loading ? (
         <View style={[styles.saveStatusBar, hasUnsavedChanges && styles.saveStatusBarPending]}>
           <View style={[styles.saveStatusDot, hasUnsavedChanges && styles.saveStatusDotPending]} />
           <Text style={[styles.saveStatusText, hasUnsavedChanges && styles.saveStatusTextPending]}>
@@ -1673,6 +1763,50 @@ const createStyles = (colors: ThemeColors) =>
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: colors.surface,
+    },
+    notTradedPanel: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10,
+      padding: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+    },
+    notTradedPanelActive: {
+      borderColor: colors.warning,
+      backgroundColor: colors.warningSoft,
+    },
+    notTradedCopy: {
+      flex: 1,
+      gap: 3,
+    },
+    notTradedTitle: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: "800",
+    },
+    notTradedHint: {
+      color: colors.textMuted,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    notTradedButton: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.warning,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+    },
+    notTradedButtonActive: {
+      backgroundColor: colors.warningSoft,
+    },
+    notTradedButtonText: {
+      color: colors.warning,
+      fontSize: 11,
+      fontWeight: "800",
     },
     dateButtonText: {
       color: colors.textPrimary,

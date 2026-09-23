@@ -4,17 +4,31 @@ import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import type { User } from "@supabase/supabase-js";
 
+import {
+  permissionsForAdmin,
+  type AdminPermission,
+  type AdminRole,
+  normalizeAdminRole,
+} from "@/lib/adminPermissions";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 type AdminAuthOptions = {
   action?: string;
+  permission?: AdminPermission;
   limit?: number;
   windowMs?: number;
 };
 
+export type AdminAccess = {
+  isAdmin: boolean;
+  role: AdminRole;
+  permissions: AdminPermission[];
+  source: "database" | "environment" | "none";
+};
+
 type AdminAuthResult =
-  | { ok: true; user: User }
+  | { ok: true; user: User; access: AdminAccess }
   | { ok: false; response: NextResponse };
 
 function parseAdminEmails(envValue?: string | null) {
@@ -31,17 +45,38 @@ function safeEqual(left: string, right: string) {
   return timingSafeEqual(a, b);
 }
 
-export async function isAdminAccount(userId: string, email?: string | null): Promise<boolean> {
+export async function getAdminAccess(userId: string, email?: string | null): Promise<AdminAccess> {
   const { data, error } = await supabaseAdmin
     .from("admin_users")
-    .select("user_id, active")
+    .select("user_id, active, role, permissions")
     .eq("user_id", userId)
     .eq("active", true)
-    .limit(1);
-  if (!error && (data ?? []).length > 0) return true;
+    .maybeSingle();
+  if (!error && data?.user_id) {
+    const role = normalizeAdminRole(data.role);
+    return {
+      isAdmin: true,
+      role,
+      permissions: permissionsForAdmin(role, data.permissions),
+      source: "database",
+    };
+  }
 
   const allowList = parseAdminEmails(process.env.ADMIN_EMAILS);
-  return Boolean(email && allowList.includes(email.toLowerCase()));
+  if (email && allowList.includes(email.toLowerCase())) {
+    return {
+      isAdmin: true,
+      role: "owner",
+      permissions: permissionsForAdmin("owner"),
+      source: "environment",
+    };
+  }
+
+  return { isAdmin: false, role: "auditor", permissions: [], source: "none" };
+}
+
+export async function isAdminAccount(userId: string, email?: string | null): Promise<boolean> {
+  return (await getAdminAccess(userId, email)).isAdmin;
 }
 
 export async function requireAdminUser(
@@ -59,9 +94,19 @@ export async function requireAdminUser(
     return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
-  const allowed = await isAdminAccount(authData.user.id, authData.user.email);
-  if (!allowed) {
+  const access = await getAdminAccess(authData.user.id, authData.user.email);
+  if (!access.isAdmin) {
     return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
+
+  if (options.permission && !access.permissions.includes(options.permission)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Insufficient admin permission", permission: options.permission },
+        { status: 403 }
+      ),
+    };
   }
 
   const action = options.action || "read";
@@ -86,7 +131,7 @@ export async function requireAdminUser(
     };
   }
 
-  return { ok: true, user: authData.user };
+  return { ok: true, user: authData.user, access };
 }
 
 export function requireAdminActionSecret(req: NextRequest, body: any) {

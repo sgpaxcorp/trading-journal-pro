@@ -1,3 +1,5 @@
+import { isNotTradedJournalEntry } from "@/lib/journalSessionStatus";
+
 export type DashboardCoachSession = {
   date: string;
   pnl: number;
@@ -110,6 +112,7 @@ export function buildDashboardCoachSource(params: {
 
   const sessions = (Array.isArray(params.entries) ? params.entries : [])
     .map((entry): DashboardCoachSession | null => {
+      if (isNotTradedJournalEntry(entry)) return null;
       const date = dateKey(entry?.date);
       if (!date || date > params.asOfDate) return null;
       return {
@@ -338,7 +341,7 @@ export function normalizeDashboardCoachPlan(params: {
   };
 }
 
-export type DailyGoalStatus = "not_configured" | "paused" | "no_activity" | "in_progress" | "met";
+export type DailyGoalStatus = "not_configured" | "paused" | "not_traded" | "no_activity" | "in_progress" | "met";
 
 export function resolveDailyGoalStatus(params: {
   hasPlan: boolean;
@@ -346,10 +349,12 @@ export function resolveDailyGoalStatus(params: {
   expectedUsd: number;
   actualUsd: number;
   hasSession: boolean;
+  isNotTraded?: boolean;
 }): DailyGoalStatus {
   if (!params.hasPlan) return "not_configured";
   if (!params.isTradingDay) return "paused";
   if (params.expectedUsd <= 0) return "not_configured";
+  if (params.isNotTraded) return "not_traded";
   if (!params.hasSession) return "no_activity";
   if (params.actualUsd >= params.expectedUsd) return "met";
   return "in_progress";

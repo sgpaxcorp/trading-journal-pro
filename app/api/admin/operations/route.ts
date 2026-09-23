@@ -51,7 +51,7 @@ async function loadQueueMetrics() {
 }
 
 export async function GET(req: NextRequest) {
-  const admin = await requireAdminUser(req, { action: "operations:read", limit: 60, windowMs: 60_000 });
+  const admin = await requireAdminUser(req, { action: "operations:read", permission: "operations.read", limit: 60, windowMs: 60_000 });
   if (!admin.ok) return admin.response;
 
   const { data: recentEvents } = await supabaseAdmin
@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const admin = await requireAdminUser(req, { action: "operations:write", limit: 12, windowMs: 10 * 60_000 });
+  const admin = await requireAdminUser(req, { action: "operations:write", permission: "operations.write", limit: 12, windowMs: 10 * 60_000 });
   if (!admin.ok) return admin.response;
 
   const body = await req.json().catch(() => ({}));

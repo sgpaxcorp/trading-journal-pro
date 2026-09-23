@@ -4,17 +4,25 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   BarChart3,
+  BookOpen,
+  BrainCircuit,
   BriefcaseBusiness,
+  Building2,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
   CloudDownload,
+  Database,
   Download,
   ExternalLink,
+  Files,
   FileWarning,
   FileText,
   History,
+  LayoutDashboard,
+  Library,
   Loader2,
+  MessageSquareText,
   Play,
   Plus,
   RefreshCw,
@@ -107,6 +115,7 @@ import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 type Lang = "en" | "es";
 type WorkspaceTab = "daily_office" | "research" | "committee" | "screener" | "fund_plan";
+type ResearchProfileTab = "overview" | "analysis" | "documents" | "reports" | "thesis";
 
 type Holding = {
   id: string;
@@ -302,13 +311,28 @@ type SectorScreenerRow = {
   criteria: Array<{
     key: string;
     label: string;
+    metricKey: string;
     status: "PASS" | "FAIL" | "DATA_NOT_AVAILABLE";
+    actualValue?: number | null;
     explanation: string;
+    diagnostic?: {
+      classification: "FACT" | "CALCULATION";
+      source: string;
+      reportingPeriod: string;
+      formula?: string | null;
+      inputs?: Array<{ name: string; value: number | null }>;
+      calculationTimestamp?: string | null;
+      unavailableReason?: string | null;
+    } | null;
   }>;
   missingMetrics: string[];
   failedCriteria: string[];
   noMagicScore: true;
   dataWarnings?: string[];
+  latestFiscalPeriod?: string;
+  fundamentalsSource?: string;
+  dataDegraded?: boolean;
+  dataQualityMessages?: string[];
 };
 
 type SectorScreenerResult = {
@@ -316,7 +340,11 @@ type SectorScreenerResult = {
   sectorLabel: string;
   sectors: Array<{ key: string; label: string }>;
   strategy: string;
-  template: { key: string; name: string };
+  template: {
+    key: string;
+    name: string;
+    criteria?: Array<{ key: string; label: string; required: boolean; rationale: string }>;
+  };
   templates: Array<{ key: string; name: string }>;
   summary: Record<string, any>;
   rows: SectorScreenerRow[];
@@ -629,6 +657,23 @@ function formatCompactNumber(value: number | null | undefined, localeTag: string
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(parsed);
+}
+
+function formatScreeningMetric(metricKey: string, value: number | null | undefined, localeTag: string) {
+  if (value == null) return DATA_NOT_AVAILABLE;
+  if (
+    metricKey.includes("yield") ||
+    metricKey.includes("growth") ||
+    metricKey.includes("margin") ||
+    metricKey.includes("dilution") ||
+    metricKey === "return_on_invested_capital"
+  ) {
+    return formatPercent(value, localeTag);
+  }
+  if (metricKey === "free_cash_flow" || metricKey === "market_capitalization") {
+    return formatCompactCurrency(value, localeTag);
+  }
+  return `${formatCompactNumber(value, localeTag)}x`;
 }
 
 function scoreFromBoolean(value: boolean, points: number) {
@@ -1278,8 +1323,8 @@ export default function NeuroAnalysisPage() {
     alternativeExplanations: L("Alternative explanations", "Explicaciones alternativas"),
   };
 
-  const [focusTicker, setFocusTicker] = useState("AAPL");
-  const [focusTickerDraft, setFocusTickerDraft] = useState("AAPL");
+  const [focusTicker, setFocusTicker] = useState("");
+  const [focusTickerDraft, setFocusTickerDraft] = useState("");
   const [researchGoal, setResearchGoal] = useState(defaultResearchGoal(isEs));
   const [filings, setFilings] = useState<FilingUpload[]>([]);
   const [filingsLoading, setFilingsLoading] = useState(false);
@@ -1307,6 +1352,9 @@ export default function NeuroAnalysisPage() {
   const [caseTitle, setCaseTitle] = useState("");
   const [cases, setCases] = useState<NeuroCaseSummary[]>([]);
   const [reports, setReports] = useState<NeuroReportSummary[]>([]);
+  const [researchLibrarySearch, setResearchLibrarySearch] = useState("");
+  const [profileOpening, setProfileOpening] = useState(false);
+  const [researchProfileTab, setResearchProfileTab] = useState<ResearchProfileTab>("overview");
   const [caseSaving, setCaseSaving] = useState(false);
   const [caseStatus, setCaseStatus] = useState("");
   const [agentError, setAgentError] = useState("");
@@ -1320,7 +1368,7 @@ export default function NeuroAnalysisPage() {
   const [documentImporting, setDocumentImporting] = useState<Record<string, boolean>>({});
   const [documentBatchImporting, setDocumentBatchImporting] = useState(false);
   const [documentImportError, setDocumentImportError] = useState("");
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("daily_office");
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("research");
   const [agentQuestion, setAgentQuestion] = useState("");
   const [agentQaLoading, setAgentQaLoading] = useState(false);
   const [agentQaError, setAgentQaError] = useState("");
@@ -2181,6 +2229,40 @@ export default function NeuroAnalysisPage() {
     independentBearCaseAnalysis,
     serverDecisionSupport,
   ]);
+  const activeCompanyProfile = useMemo(
+    () => cases.find((item) => item.id === activeCaseId) ?? null,
+    [activeCaseId, cases]
+  );
+  const companyProfiles = useMemo(() => {
+    const seen = new Set<string>();
+    return cases.filter((item) => {
+      const ticker = String(item.focus_ticker ?? "").trim().toUpperCase();
+      if (!ticker || item.status === "archived" || seen.has(ticker)) return false;
+      seen.add(ticker);
+      return true;
+    });
+  }, [cases]);
+  const filteredCompanyProfiles = useMemo(() => {
+    const query = researchLibrarySearch.trim().toLowerCase();
+    if (!query) return companyProfiles;
+    return companyProfiles.filter((item) =>
+      [item.focus_ticker, item.title, item.research_goal]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query))
+    );
+  }, [companyProfiles, researchLibrarySearch]);
+  const latestProfileReport = reports[0] ?? null;
+  const selectedProfileReport =
+    reports.find((report) => report.id === activeReportId) ?? latestProfileReport;
+  const currentResearchView =
+    currentDecisionSupport?.systemDisposition?.basis?.[0] ||
+    investmentThesisReview?.summary ||
+    (agentReport
+      ? agentReport
+          .split("\n")
+          .map((line) => line.trim())
+          .find((line) => line.length > 40) ?? ""
+      : "");
   const selectedCommitteePacket = useMemo(
     () =>
       committeePackets.find((packet) => packet.id === selectedCommitteePacketId) ??
@@ -2304,8 +2386,73 @@ export default function NeuroAnalysisPage() {
     const res = await authedFetch(`/api/neuro-analysis/cases${suffix}`).catch(() => null);
     const json = res ? await res.json().catch(() => ({})) : {};
     if (res?.ok) {
-      setCases(Array.isArray(json?.cases) ? json.cases : []);
+      const nextCases = Array.isArray(json?.cases) ? json.cases : [];
+      setCases(nextCases);
       if (Array.isArray(json?.reports)) setReports(json.reports);
+      if (!caseId && !activeCaseId && nextCases[0]?.id) {
+        await loadResearchCase(String(nextCases[0].id), { activateWorkspace: false });
+      }
+    }
+  }
+
+  async function openOrCreateCompanyProfile(tickerInput = focusTickerDraft) {
+    const ticker = tickerInput.trim().toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12);
+    if (!ticker || profileOpening) return;
+
+    try {
+      setProfileOpening(true);
+      setCaseStatus("");
+      setActiveWorkspaceTab("research");
+      setResearchProfileTab("overview");
+
+      const existing = companyProfiles.find(
+        (item) => String(item.focus_ticker ?? "").trim().toUpperCase() === ticker
+      );
+      if (existing) {
+        await loadResearchCase(existing.id);
+        setResearchLibrarySearch("");
+        setCaseStatus(L("Company profile opened.", "Profile de compañía abierto."));
+        return;
+      }
+
+      startNewResearchCase(ticker);
+      const knownMarketData = marketDataByTicker[ticker] ?? null;
+      const title = knownMarketData?.company?.name
+        ? `${knownMarketData.company.name} (${ticker})`
+        : `${ticker} Company Profile`;
+      const res = await authedFetch("/api/neuro-analysis/cases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          focusTicker: ticker,
+          researchGoal: defaultResearchGoal(isEs),
+          holdings: portfolioHoldings.map((holding) => ({
+            ticker: holding.ticker,
+            shares: holding.shares,
+            averageCost: holding.averageCost,
+            currentPrice: holding.currentPrice,
+            openedAt: holding.openedAt,
+          })),
+          marketData: knownMarketData ? { items: { [ticker]: knownMarketData } } : {},
+          readiness: {},
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Could not create company profile.");
+      const saved = json?.case;
+      if (!saved?.id) throw new Error("Company profile was not returned after creation.");
+      setActiveCaseId(String(saved.id));
+      setCaseTitle(String(saved.title ?? title));
+      setFocusTicker(ticker);
+      setFocusTickerDraft(ticker);
+      setResearchLibrarySearch("");
+      setCaseStatus(L("Company profile created and saved.", "Profile de compañía creado y guardado."));
+      await loadCaseList(String(saved.id));
+    } catch (error: any) {
+      setCaseStatus(error?.message || L("Could not open the company profile.", "No se pudo abrir el profile de compañía."));
+    } finally {
+      setProfileOpening(false);
     }
   }
 
@@ -2316,7 +2463,7 @@ export default function NeuroAnalysisPage() {
       const title =
         caseTitle.trim() ||
         marketData?.company?.name ||
-        (focusTicker ? `${focusTicker} research` : "Research case");
+        (focusTicker ? `${focusTicker} Company Profile` : "Company Profile");
       const res = await authedFetch("/api/neuro-analysis/cases", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2342,7 +2489,7 @@ export default function NeuroAnalysisPage() {
       const saved = json?.case;
       if (saved?.id) setActiveCaseId(String(saved.id));
       setCaseTitle(String(saved?.title ?? title));
-      setCaseStatus(L("Research case saved.", "Caso de research guardado."));
+      setCaseStatus(L("Company profile saved.", "Profile de compañía guardado."));
       await loadCaseList(saved?.id ? String(saved.id) : activeCaseId);
     } catch (error: any) {
       setCaseStatus(error?.message || "Could not save research case.");
@@ -2351,10 +2498,14 @@ export default function NeuroAnalysisPage() {
     }
   }
 
-  async function loadResearchCase(caseId: string) {
+  async function loadResearchCase(caseId: string, options: { activateWorkspace?: boolean } = {}) {
+    if (options.activateWorkspace !== false) {
+      setActiveWorkspaceTab("research");
+      setResearchProfileTab("overview");
+    }
     const res = await authedFetch(`/api/neuro-analysis/cases/${encodeURIComponent(caseId)}`);
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json?.error || "Could not load research case.");
+    if (!res.ok) throw new Error(json?.error || "Could not load company profile.");
     const researchCase = json?.case;
     setActiveCaseId(String(researchCase.id));
     setCaseTitle(String(researchCase.title ?? ""));
@@ -2439,6 +2590,7 @@ export default function NeuroAnalysisPage() {
   }
 
   function openSavedReport(report: NeuroReportSummary) {
+    setResearchProfileTab("reports");
     setActiveReportId(String(report.id));
     setAgentReport(String(report.report_text ?? ""));
     setEngineSnapshot(report.engine ?? report.structured?.engine ?? null);
@@ -3274,31 +3426,7 @@ export default function NeuroAnalysisPage() {
   function openScreenerTicker(ticker: string) {
     const nextTicker = ticker.trim().toUpperCase();
     if (!nextTicker) return;
-    if (originalInvestmentThesis && nextTicker !== originalInvestmentThesis.ticker) {
-      startNewResearchCase(nextTicker);
-      return;
-    }
-    setFocusTicker(nextTicker);
-    setFocusTickerDraft(nextTicker);
-    setResearchGoal(defaultResearchGoal(isEs));
-    setActiveWorkspaceTab("research");
-  }
-
-  function applyFocusTicker(ticker = focusTickerDraft) {
-    const nextTicker = ticker.trim().toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12);
-    if (!nextTicker) return;
-    if (originalInvestmentThesis && nextTicker !== originalInvestmentThesis.ticker) {
-      setFocusTickerDraft(originalInvestmentThesis.ticker);
-      setCaseStatus(
-        L(
-          "This case has a permanent original thesis. Start a new research case for another ticker.",
-          "Este caso tiene una tesis original permanente. Inicia otro caso de research para usar otro ticker."
-        )
-      );
-      return;
-    }
-    setFocusTicker(nextTicker);
-    setFocusTickerDraft(nextTicker);
+    void openOrCreateCompanyProfile(nextTicker);
   }
 
   function startNewResearchCase(ticker = "") {
@@ -3334,7 +3462,8 @@ export default function NeuroAnalysisPage() {
     setCommitteeDecisions([]);
     setSelectedCommitteePacketId(null);
     setActiveWorkspaceTab("research");
-    setCaseStatus(L("New research case ready.", "Nuevo caso de research listo."));
+    setResearchProfileTab("overview");
+    setCaseStatus(L("New company profile ready.", "Nuevo profile de compañía listo."));
   }
 
   function updatePortfolioHolding(id: string, patch: Partial<Holding>) {
@@ -3453,106 +3582,50 @@ export default function NeuroAnalysisPage() {
       <TopNav />
 
       <div className="mx-auto w-full max-w-none space-y-4 px-4 py-5 sm:px-6 md:px-10 xl:px-14">
-        <header className="rounded-xl border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/20 sm:p-5">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-end">
+        <header className="border-y border-slate-800 bg-slate-900/55 px-1 py-5 sm:px-2">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-sky-400/40 bg-sky-500/10 px-3 py-1 text-[11px] font-semibold uppercase text-sky-200">
-                  {L("Private Investment Portal", "Portal privado de inversión")}
-                </span>
-                <span className="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold uppercase text-emerald-200">
-                  {L("Long-term / dividends", "Largo plazo / dividendos")}
-                </span>
+              <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-300">
+                <BriefcaseBusiness className="h-4 w-4" />
+                {L("Private investment operating system", "Sistema operativo privado de inversión")}
               </div>
-              <h1 className="mt-3 text-2xl font-semibold tracking-normal sm:text-3xl">
-                {L("Neuro Analysis Investment Portal", "Neuro Analysis Investment Portal")}
+              <h1 className="mt-2 text-2xl font-semibold text-slate-50 sm:text-3xl">
+                {L("Neuro Investment Office", "Neuro Investment Office")}
               </h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
                 {L(
-                  "Private research profiles for stocks, ETFs, dividend decisions, valuation, and living thesis reviews.",
-                  "Profiles privados para acciones, ETFs, decisiones de dividendos, valoración y revisión de tesis viva."
+                  "Open a company once, preserve its evidence, and build a versioned research history around it.",
+                  "Abre una compañía una vez, conserva su evidencia y construye un historial de research versionado."
                 )}
               </p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2 sm:items-end lg:grid-cols-[minmax(220px,1fr)_minmax(180px,0.7fr)_auto_auto]">
-                <input
-                  value={caseTitle}
-                  onChange={(event) => setCaseTitle(event.target.value)}
-                  placeholder={L("Research case name", "Nombre del caso de research")}
-                  className="h-10 w-full rounded-lg border border-slate-800 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-sky-400"
-                />
-                <label className="block">
-                  <span className="sr-only">{L("Active ticker", "Ticker activo")}</span>
-                  <div className="flex h-10 overflow-hidden rounded-lg border border-sky-500/40 bg-slate-950/70 focus-within:border-sky-300">
-                    <input
-                      value={focusTickerDraft}
-                      disabled={Boolean(originalInvestmentThesis)}
-                      onChange={(event) =>
-                        setFocusTickerDraft(event.target.value.toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12))
-                      }
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          applyFocusTicker();
-                        }
-                      }}
-                      aria-label={L("Active ticker", "Ticker activo")}
-                      title={originalInvestmentThesis ? L("Original thesis ticker is locked", "El ticker de la tesis original está bloqueado") : undefined}
-                      className="min-w-0 flex-1 bg-transparent px-3 text-sm font-semibold text-slate-100 outline-none disabled:cursor-not-allowed disabled:text-slate-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => applyFocusTicker()}
-                      disabled={Boolean(originalInvestmentThesis)}
-                      aria-label={L("Load company profile", "Cargar profile de compañía")}
-                      title={L("Load company profile", "Cargar profile de compañía")}
-                      className="inline-flex w-10 shrink-0 items-center justify-center border-l border-slate-800 text-sky-300 hover:bg-sky-400/10 hover:text-sky-100 disabled:cursor-not-allowed disabled:text-slate-600"
-                    >
-                      <Search className="h-4 w-4" />
-                    </button>
-                  </div>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => startNewResearchCase()}
-                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-sky-500/40 bg-sky-500/5 px-3 py-2 text-xs font-semibold text-sky-100 hover:bg-sky-500/10"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  {L("New case", "Nuevo caso")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void saveResearchCase()}
-                  disabled={caseSaving || !focusTicker.trim()}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200 disabled:opacity-50"
-                >
-                  {caseSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                  {caseSaving ? L("Saving", "Guardando") : L("Save case", "Guardar caso")}
-                </button>
-              </div>
-              {caseStatus ? <p className="mt-2 text-xs text-emerald-300">{caseStatus}</p> : null}
             </div>
-
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <Readout label={L("Readiness", "Preparación")} value={`${readinessScore}%`} />
-              <Readout label={L("Focus", "Foco")} value={focusTicker || "-"} />
+            <div className="grid grid-cols-2 divide-x divide-slate-800 border-y border-slate-800 py-2 lg:min-w-[320px]">
+              <div className="px-4">
+                <p className="text-[10px] font-semibold uppercase text-slate-500">{L("Company profiles", "Profiles")}</p>
+                <p className="mt-1 text-lg font-semibold text-slate-100">{companyProfiles.length}</p>
+              </div>
+              <div className="px-4">
+                <p className="text-[10px] font-semibold uppercase text-slate-500">{L("Active reports", "Reportes activos")}</p>
+                <p className="mt-1 text-lg font-semibold text-slate-100">{reports.length}</p>
+              </div>
             </div>
           </div>
         </header>
 
         <nav
           aria-label={L("Neuro Analysis workspaces", "Workspaces de Neuro Analysis")}
-          className="flex flex-wrap gap-2 rounded-xl border border-slate-800 bg-slate-900/70 p-2"
+          className="flex gap-2 overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/70 p-2"
         >
           {[
+            {
+              id: "research" as const,
+              icon: Library,
+              title: L("Research Library", "Biblioteca de Research"),
+            },
             {
               id: "daily_office" as const,
               icon: CalendarClock,
               title: L("Daily Office", "Oficina Diaria"),
-            },
-            {
-              id: "research" as const,
-              icon: Search,
-              title: L("Profiles", "Profiles"),
             },
             {
               id: "committee" as const,
@@ -3577,7 +3650,7 @@ export default function NeuroAnalysisPage() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveWorkspaceTab(tab.id)}
-                className={`inline-flex min-h-10 items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition ${
+                className={`inline-flex min-h-10 shrink-0 items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition ${
                   active
                     ? "border-emerald-400/70 bg-emerald-400/10 text-emerald-50"
                     : "border-slate-800 bg-slate-950/45 text-slate-300 hover:border-sky-400/70 hover:text-sky-100"
@@ -3589,6 +3662,234 @@ export default function NeuroAnalysisPage() {
             );
           })}
         </nav>
+
+        {activeWorkspaceTab === "research" ? (
+          <div className="space-y-4">
+            <section className="border-y border-slate-800 bg-slate-900/45 px-3 py-4 sm:px-4">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Library className="h-4 w-4 text-sky-300" />
+                    <h2 className="text-base font-semibold text-slate-100">
+                      {L("Research Library", "Biblioteca de Research")}
+                    </h2>
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">
+                    {L(
+                      "Enter a ticker to open its permanent profile or create it once.",
+                      "Escribe un ticker para abrir su profile permanente o crearlo una sola vez."
+                    )}
+                  </p>
+                </div>
+
+                <div className="flex w-full max-w-xl gap-2">
+                  <label className="min-w-0 flex-1">
+                    <span className="sr-only">{L("Ticker or saved profile", "Ticker o profile guardado")}</span>
+                    <div className="flex h-11 overflow-hidden rounded-lg border border-slate-700 bg-slate-950/75 focus-within:border-emerald-400">
+                      <Search className="ml-3 h-4 w-4 shrink-0 self-center text-slate-500" />
+                      <input
+                        value={researchLibrarySearch}
+                        onChange={(event) =>
+                          setResearchLibrarySearch(
+                            event.target.value.toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12)
+                          )
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void openOrCreateCompanyProfile(researchLibrarySearch);
+                          }
+                        }}
+                        placeholder={L("Enter ticker, e.g. AAPL", "Escribe ticker, ej. AAPL")}
+                        className="min-w-0 flex-1 bg-transparent px-3 text-sm font-semibold text-slate-100 outline-none placeholder:font-normal placeholder:text-slate-600"
+                      />
+                    </div>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void openOrCreateCompanyProfile(researchLibrarySearch)}
+                    disabled={!researchLibrarySearch.trim() || profileOpening}
+                    className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-emerald-400 px-4 text-sm font-semibold text-slate-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {profileOpening ? <Loader2 className="h-4 w-4 animate-spin" /> : <Building2 className="h-4 w-4" />}
+                    {L("Open profile", "Abrir profile")}
+                  </button>
+                </div>
+              </div>
+
+              {companyProfiles.length ? (
+                <div className="mt-4 flex gap-2 overflow-x-auto border-t border-slate-800 pt-3 pb-1">
+                  {(researchLibrarySearch ? filteredCompanyProfiles : companyProfiles).slice(0, 10).map((item) => {
+                    const ticker = String(item.focus_ticker ?? "").toUpperCase();
+                    const active = activeCaseId === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => void loadResearchCase(item.id)}
+                        className={`inline-flex min-h-10 shrink-0 items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${
+                          active
+                            ? "border-emerald-400/70 bg-emerald-400/10 text-emerald-50"
+                            : "border-slate-800 bg-slate-950/45 text-slate-300 hover:border-sky-400/60"
+                        }`}
+                      >
+                        <span className="text-xs font-bold">{ticker}</span>
+                        <span className="max-w-40 truncate text-[11px] text-slate-500">
+                          {item.title || L("Company profile", "Profile de compañía")}
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {researchLibrarySearch && filteredCompanyProfiles.length === 0 ? (
+                    <p className="py-2 text-xs text-slate-500">
+                      {L("No saved profile matches this ticker. Open it to create one.", "No hay un profile guardado para este ticker. Ábrelo para crearlo.")}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </section>
+
+            {focusTicker ? (
+              <section className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900/75 shadow-lg shadow-slate-950/20">
+                <div className="grid gap-5 px-4 py-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start sm:px-5">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex h-9 min-w-16 items-center justify-center rounded-lg border border-emerald-400/40 bg-emerald-400/10 px-3 text-sm font-bold text-emerald-100">
+                        {focusTicker}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-500">
+                        {activeCaseId ? L("Saved company profile", "Profile guardado") : L("Unsaved profile", "Profile sin guardar")}
+                      </span>
+                    </div>
+                    <h2 className="mt-3 truncate text-2xl font-semibold text-slate-50">
+                      {marketData?.company?.name || activeCompanyProfile?.title || focusTicker}
+                    </h2>
+                    <p className="mt-2 text-sm text-slate-400">
+                      {[marketData?.company?.exchange, marketData?.company?.sector, marketData?.company?.industry]
+                        .filter(Boolean)
+                        .join(" / ") || L("Company data is loading.", "La data de la compañía está cargando.")}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 lg:justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setMarketRefreshNonce((value) => value + 1)}
+                      disabled={marketLoading}
+                      title={L("Refresh company data", "Refrescar data de compañía")}
+                      aria-label={L("Refresh company data", "Refrescar data de compañía")}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-700 text-slate-300 hover:border-sky-400 hover:text-sky-200 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${marketLoading ? "animate-spin" : ""}`} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveResearchCase()}
+                      disabled={caseSaving || !focusTicker.trim()}
+                      title={L("Save company profile", "Guardar profile")}
+                      aria-label={L("Save company profile", "Guardar profile")}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-emerald-200 disabled:opacity-50"
+                    >
+                      {caseSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResearchProfileTab("reports");
+                        void autoBuildEvidenceAndRun();
+                      }}
+                      disabled={agentLoading || autoRunLoading || !focusTicker.trim()}
+                      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-50"
+                    >
+                      {agentLoading || autoRunLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                      {L("Run company report", "Correr reporte")}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 border-l border-t border-slate-800 bg-slate-950/35 md:grid-cols-5">
+                  {[
+                    {
+                      label: L("Market price", "Precio"),
+                      value: formatCurrency(marketData?.market?.regularMarketPrice, localeTag),
+                    },
+                    {
+                      label: L("Research view", "Opinión actual"),
+                      value: systemDispositionLabel(currentDecisionSupport?.systemDisposition?.code),
+                    },
+                    {
+                      label: L("Evidence", "Evidencia"),
+                      value: `${indexedDocuments.length} ${L("documents", "documentos")}`,
+                    },
+                    {
+                      label: L("Reports", "Reportes"),
+                      value: String(reports.length),
+                    },
+                    {
+                      label: L("Last updated", "Actualizado"),
+                      value: activeCompanyProfile?.updated_at
+                        ? new Date(activeCompanyProfile.updated_at).toLocaleDateString(localeTag)
+                        : marketData?.dataQuality?.fetchedAt
+                          ? new Date(marketData.dataQuality.fetchedAt).toLocaleDateString(localeTag)
+                          : "-",
+                    },
+                  ].map((item) => (
+                    <div key={item.label} className="min-w-0 border-r border-b border-slate-800 px-4 py-3">
+                      <p className="text-[10px] font-semibold uppercase text-slate-600">{item.label}</p>
+                      <p className="mt-1 truncate text-sm font-semibold text-slate-200" title={item.value}>{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <nav aria-label={L("Company profile sections", "Secciones del profile")} className="flex gap-1 overflow-x-auto p-2">
+                  {([
+                    ["overview", LayoutDashboard, L("Overview", "Resumen")],
+                    ["analysis", BrainCircuit, L("Full Analysis", "Análisis completo")],
+                    ["documents", Files, L("Documents", "Documentos")],
+                    ["reports", FileText, L("Reports", "Reportes")],
+                    ["thesis", BookOpen, L("Thesis & Notes", "Tesis y notas")],
+                  ] as Array<[ResearchProfileTab, typeof LayoutDashboard, string]>).map(([id, Icon, label]) => {
+                    const active = researchProfileTab === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setResearchProfileTab(id)}
+                        className={`inline-flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold ${
+                          active ? "bg-slate-800 text-slate-50" : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                        }`}
+                      >
+                        <Icon className={`h-4 w-4 ${active ? "text-emerald-300" : "text-slate-500"}`} />
+                        {label}
+                      </button>
+                    );
+                  })}
+                </nav>
+              </section>
+            ) : (
+              <section className="border-y border-slate-800 bg-slate-900/45 px-5 py-12 text-center sm:py-16">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border border-emerald-400/35 bg-emerald-400/10 text-emerald-200">
+                  <Building2 className="h-6 w-6" />
+                </div>
+                <h2 className="mt-5 text-xl font-semibold text-slate-100">
+                  {L("Open your first company profile", "Abre tu primer profile de compañía")}
+                </h2>
+                <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">
+                  {L(
+                    "Enter a ticker above. The profile becomes the permanent home for company data, filings, research versions, thesis notes, and committee history.",
+                    "Escribe un ticker arriba. El profile se convierte en el hogar permanente de la data, filings, versiones de research, notas de tesis e historial del comité."
+                  )}
+                </p>
+              </section>
+            )}
+
+            {caseStatus ? (
+              <p className={`px-1 text-xs ${/could not|error|failed|no se pudo|falló/i.test(caseStatus) ? "text-rose-300" : "text-emerald-300"}`}>
+                {caseStatus}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className={activeWorkspaceTab === "daily_office" ? "" : "hidden"}>
           <DailyInvestmentOfficePanel isEs={isEs} />
@@ -4084,6 +4385,440 @@ export default function NeuroAnalysisPage() {
             </aside>
           </div>
         </section>
+
+        {activeWorkspaceTab === "research" && researchProfileTab === "overview" ? (
+          <section className="space-y-4">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.6fr)]">
+              <div className="border-y border-emerald-400/25 bg-emerald-400/[0.035] px-4 py-5 sm:px-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="max-w-4xl">
+                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-300">
+                      <BrainCircuit className="h-4 w-4" />
+                      {L("Current research view", "Opinión actual de research")}
+                    </div>
+                    <h2 className="mt-3 text-xl font-semibold text-slate-50">
+                      {systemDispositionLabel(currentDecisionSupport?.systemDisposition?.code) !== "-"
+                        ? systemDispositionLabel(currentDecisionSupport?.systemDisposition?.code)
+                        : L("Research profile is being assembled", "El profile de research se está preparando")}
+                    </h2>
+                    <p className="mt-3 text-sm leading-7 text-slate-300">
+                      {currentResearchView ||
+                        L(
+                          "Run the first company report to create an evidence-backed view. Neuro will preserve it and compare future evidence against it.",
+                          "Corre el primer reporte para crear una opinión respaldada por evidencia. Neuro la conservará y comparará evidencia futura contra ella."
+                        )}
+                    </p>
+                  </div>
+                  <span className={`inline-flex shrink-0 rounded-lg border px-3 py-2 text-xs font-semibold ${systemDispositionTone(currentDecisionSupport?.systemDisposition?.code)}`}>
+                    {currentDecisionSupport?.evidenceCompleteness
+                      ? currentDecisionSupport.evidenceCompleteness.replaceAll("_", " ").toUpperCase()
+                      : L("NO REPORT YET", "SIN REPORTE")}
+                  </span>
+                </div>
+
+                <div className="mt-5 grid grid-cols-2 border-l border-t border-slate-800 md:grid-cols-3">
+                  {[
+                    [L("Revenue", "Ingresos"), formatCompactCurrency(latestFundamentals?.totalRevenue, localeTag)],
+                    [L("Free cash flow", "Flujo de caja libre"), formatCompactCurrency(latestFundamentals?.freeCashFlow, localeTag)],
+                    [L("Operating margin", "Margen operativo"), formatPercent(latestFundamentals?.operatingMargin, localeTag)],
+                    [L("Market cap", "Capitalización"), formatCompactCurrency(marketData?.market?.marketCap, localeTag)],
+                    [L("Debt / equity", "Deuda / equity"), formatCompactNumber(latestFundamentals?.debtToEquity, localeTag)],
+                    [L("Fiscal period", "Periodo fiscal"), latestFundamentals?.reportingPeriod || latestFundamentals?.year || DATA_NOT_AVAILABLE],
+                  ].map(([label, value]) => (
+                    <div key={String(label)} className="min-w-0 border-r border-b border-slate-800 px-3 py-4">
+                      <p className="text-[10px] font-semibold uppercase text-slate-600">{label}</p>
+                      <p className="mt-1 truncate text-sm font-semibold text-slate-200">{value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setResearchProfileTab("analysis")}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-sky-400 hover:text-sky-100"
+                  >
+                    <BrainCircuit className="h-4 w-4" />
+                    {L("Open full analysis", "Abrir análisis completo")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setResearchProfileTab("documents")}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-sky-400 hover:text-sky-100"
+                  >
+                    <Files className="h-4 w-4" />
+                    {L("Review evidence", "Revisar evidencia")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setResearchProfileTab("thesis")}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-violet-400 hover:text-violet-100"
+                  >
+                    <MessageSquareText className="h-4 w-4" />
+                    {L("Discuss the thesis", "Conversar sobre la tesis")}
+                  </button>
+                </div>
+              </div>
+
+              <aside className="border-y border-slate-800 bg-slate-900/55 px-4 py-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-sky-300">
+                      {L("Evidence status", "Estado de evidencia")}
+                    </p>
+                    <h3 className="mt-2 text-base font-semibold text-slate-100">
+                      {readinessScore}% {L("research ready", "research listo")}
+                    </h3>
+                  </div>
+                  <Database className="h-5 w-5 text-sky-300" />
+                </div>
+                <div className="mt-4 space-y-3 border-y border-slate-800 py-4 text-xs">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-500">{L("Market layer", "Capa de mercado")}</span>
+                    <span className={marketLayerReady ? "font-semibold text-emerald-300" : "font-semibold text-amber-300"}>
+                      {marketLayerReady ? L("Ready", "Lista") : L("Pending", "Pendiente")}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-500">{L("Indexed documents", "Documentos indexados")}</span>
+                    <span className="font-semibold text-slate-200">{indexedDocuments.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-500">{L("Saved reports", "Reportes guardados")}</span>
+                    <span className="font-semibold text-slate-200">{reports.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-500">{L("Original thesis", "Tesis original")}</span>
+                    <span className={originalInvestmentThesis ? "font-semibold text-emerald-300" : "font-semibold text-slate-500"}>
+                      {originalInvestmentThesis ? L("Frozen", "Congelada") : L("Not established", "No establecida")}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase text-slate-500">{L("Recent reports", "Reportes recientes")}</p>
+                    <button type="button" onClick={() => setResearchProfileTab("reports")} className="text-xs font-semibold text-sky-300 hover:text-sky-100">
+                      {L("View all", "Ver todos")}
+                    </button>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {reports.slice(0, 3).map((report, index) => (
+                      <button
+                        key={report.id}
+                        type="button"
+                        onClick={() => openSavedReport(report)}
+                        className="flex w-full items-center justify-between gap-3 border-t border-slate-800 py-3 text-left first:border-t-0"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-xs font-semibold text-slate-200">
+                            {L("Company research report", "Reporte de compañía")} #{reports.length - index}
+                          </span>
+                          <span className="mt-1 block text-[11px] text-slate-600">
+                            {report.created_at ? new Date(report.created_at).toLocaleString(localeTag) : "-"}
+                          </span>
+                        </span>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-slate-600" />
+                      </button>
+                    ))}
+                    {!reports.length ? (
+                      <p className="py-4 text-xs leading-5 text-slate-500">
+                        {L("No reports yet. The first run becomes version one of this profile's history.", "Aún no hay reportes. La primera ejecución será la versión uno del historial.")}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </section>
+        ) : null}
+
+        {activeWorkspaceTab === "research" && researchProfileTab === "documents" ? (
+          <section className="border-y border-slate-800 bg-slate-900/55 px-4 py-5 sm:px-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Files className="h-4 w-4 text-sky-300" />
+                  <h2 className="text-lg font-semibold text-slate-100">{L("Company Evidence Library", "Biblioteca de evidencia")}</h2>
+                </div>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                  {L(
+                    "Official filings and uploaded evidence remain attached to this company profile and can be reused in every future report.",
+                    "Los filings oficiales y documentos subidos permanecen unidos a este profile y se reutilizan en reportes futuros."
+                  )}
+                </p>
+              </div>
+              {!focusInstrumentIsFundLike ? (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void findCompanyDocuments()}
+                    disabled={documentLookupLoading || !focusTicker.trim()}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-sky-400 hover:text-sky-100 disabled:opacity-50"
+                  >
+                    {documentLookupLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    {L("Find SEC filings", "Buscar filings SEC")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void importLatestCompanyDocuments()}
+                    disabled={documentBatchImporting || !documentLookup.length}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-400 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-50"
+                  >
+                    {documentBatchImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+                    {L("Import latest", "Importar recientes")}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-5 grid gap-5 xl:grid-cols-2">
+              <div className="border-t border-slate-800 pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-xs font-semibold uppercase text-slate-500">{L("Official documents found", "Documentos oficiales encontrados")}</h3>
+                  <span className="text-xs text-slate-600">{documentLookup.length}</span>
+                </div>
+                <div className="mt-3 max-h-[440px] divide-y divide-slate-800 overflow-auto">
+                  {documentLookup.slice(0, 16).map((doc) => {
+                    const key = companyDocumentKey(doc);
+                    const importing = Boolean(documentImporting[key]);
+                    const imported = companyDocumentIsImported(doc);
+                    return (
+                      <div key={key} className="flex items-center justify-between gap-3 py-3 text-xs">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-200">{doc.form} <span className="ml-2 font-normal text-slate-500">{doc.periodEnd || doc.filingDate}</span></p>
+                          <p className="mt-1 truncate text-[11px] text-slate-600">{doc.companyName} / {doc.accessionNumber}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <a href={doc.documentUrl} target="_blank" rel="noreferrer" title={L("Open SEC document", "Abrir documento SEC")} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-800 text-slate-400 hover:border-sky-400 hover:text-sky-200">
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => void importCompanyDocument(doc)}
+                            disabled={importing || imported || documentBatchImporting}
+                            className={`inline-flex min-h-9 min-w-24 items-center justify-center gap-2 rounded-lg border px-3 text-xs font-semibold ${imported ? "border-emerald-400/40 text-emerald-300" : "border-slate-700 text-slate-200 hover:border-sky-400"} disabled:opacity-60`}
+                          >
+                            {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : imported ? <CheckCircle2 className="h-3.5 w-3.5" /> : <CloudDownload className="h-3.5 w-3.5" />}
+                            {imported ? L("Indexed", "Indexado") : L("Import", "Importar")}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!documentLookup.length ? <p className="py-8 text-sm text-slate-500">{L("Search SEC to discover the latest company filings.", "Busca en SEC para descubrir los filings más recientes.")}</p> : null}
+                </div>
+              </div>
+
+              <div className="border-t border-slate-800 pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-xs font-semibold uppercase text-slate-500">{L("Indexed in this profile", "Indexados en este profile")}</h3>
+                  <span className="text-xs text-slate-600">{filings.length}</span>
+                </div>
+                {!focusInstrumentIsFundLike ? (
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {(["10-K", "10-Q"] as const).map((form) => (
+                      <label key={form} className="flex min-h-20 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-700 text-xs font-semibold text-slate-300 hover:border-sky-400 hover:text-sky-100">
+                        <UploadCloud className="h-4 w-4 text-sky-300" />
+                        {L(`Upload ${form}`, `Subir ${form}`)}
+                        <input type="file" accept="application/pdf" multiple onChange={(event) => handleDocumentFiles(form, event.target.files)} className="sr-only" />
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="mt-3 max-h-[340px] divide-y divide-slate-800 overflow-auto">
+                  {filings.map((filing) => (
+                    <div key={filing.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 py-3 text-xs">
+                      <span className="rounded-lg border border-slate-700 px-2 py-1 font-semibold text-slate-300">{filing.form}</span>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-slate-200">{filing.fileName}</p>
+                        <p className="mt-1 text-[11px] text-slate-600">{filing.fiscalYear ?? "-"} / {filing.period || "-"} / {formatFileSize(filing.usageBytes || filing.bytes, localeTag)}</p>
+                      </div>
+                      <button type="button" onClick={() => void removeDocument(filing.id)} title={L("Remove document", "Quitar documento")} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-800 text-slate-500 hover:border-rose-400 hover:text-rose-200">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                  {!filings.length ? <p className="py-8 text-sm text-slate-500">{L("No evidence has been indexed for this profile yet.", "Todavía no hay evidencia indexada para este profile.")}</p> : null}
+                </div>
+              </div>
+            </div>
+            {documentLookupError ? <p className="mt-3 text-xs text-rose-300">{documentLookupError}</p> : null}
+            {documentImportError ? <p className="mt-3 text-xs text-rose-300">{documentImportError}</p> : null}
+          </section>
+        ) : null}
+
+        {activeWorkspaceTab === "research" && researchProfileTab === "reports" ? (
+          <section className="border-y border-slate-800 bg-slate-900/55 px-4 py-5 sm:px-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-emerald-300" />
+                  <h2 className="text-lg font-semibold text-slate-100">{L("Versioned Research Reports", "Reportes de research versionados")}</h2>
+                </div>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                  {L("Every run is preserved with its evidence and data cutoff. Opening an older report never overwrites it.", "Cada ejecución conserva su evidencia y fecha de corte. Abrir un reporte anterior nunca lo sobrescribe.")}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {agentReport ? (
+                  <button type="button" onClick={() => void downloadReportPdf()} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-sky-400 hover:text-sky-100">
+                    <Download className="h-4 w-4" />
+                    PDF
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void autoBuildEvidenceAndRun()}
+                  disabled={agentLoading || autoRunLoading || !focusTicker.trim()}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-50"
+                >
+                  {agentLoading || autoRunLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                  {L("Run new report", "Correr nuevo reporte")}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <aside className="border-t border-slate-800 pt-3">
+                <p className="text-xs font-semibold uppercase text-slate-500">{L("Report history", "Historial de reportes")}</p>
+                <div className="mt-3 max-h-[620px] divide-y divide-slate-800 overflow-auto">
+                  {reports.map((report, index) => (
+                    <button
+                      key={report.id}
+                      type="button"
+                      onClick={() => openSavedReport(report)}
+                      className={`w-full py-3 text-left ${activeReportId === report.id ? "text-emerald-100" : "text-slate-300 hover:text-sky-100"}`}
+                    >
+                      <span className="flex items-center justify-between gap-3">
+                        <span className="text-xs font-semibold">{L("Company report", "Reporte de compañía")} #{reports.length - index}</span>
+                        {report.requires_filings ? <span className="text-[10px] font-semibold text-amber-300">{L("PROVISIONAL", "PROVISIONAL")}</span> : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />}
+                      </span>
+                      <span className="mt-1 block text-[11px] text-slate-600">{report.created_at ? new Date(report.created_at).toLocaleString(localeTag) : "-"}</span>
+                    </button>
+                  ))}
+                  {!reports.length ? <p className="py-8 text-sm leading-6 text-slate-500">{L("No reports have been generated for this company profile.", "No se han generado reportes para este profile.")}</p> : null}
+                </div>
+              </aside>
+
+              <article className="min-w-0 border-t border-slate-800 pt-4">
+                {selectedProfileReport || agentReport ? (
+                  <>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase text-emerald-300">{L("Selected version", "Versión seleccionada")}</p>
+                        <h3 className="mt-1 text-base font-semibold text-slate-100">{marketData?.company?.name || focusTicker} / {L("Company Research", "Research de compañía")}</h3>
+                        <p className="mt-1 text-xs text-slate-600">
+                          {selectedProfileReport?.created_at ? new Date(selectedProfileReport.created_at).toLocaleString(localeTag) : new Date().toLocaleString(localeTag)}
+                        </p>
+                      </div>
+                      <span className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300">
+                        {selectedProfileReport?.requires_filings ? L("Provisional evidence", "Evidencia provisional") : L("Evidence-backed", "Respaldado por evidencia")}
+                      </span>
+                    </div>
+                    <pre className="mt-5 max-h-[760px] overflow-auto whitespace-pre-wrap border-y border-slate-800 bg-slate-950/45 px-4 py-5 font-sans text-sm leading-7 text-slate-200">
+                      {agentReport || selectedProfileReport?.report_text}
+                    </pre>
+                  </>
+                ) : (
+                  <div className="py-16 text-center">
+                    <FileText className="mx-auto h-8 w-8 text-slate-700" />
+                    <p className="mt-4 text-sm font-semibold text-slate-300">{L("This profile has no report yet", "Este profile todavía no tiene reporte")}</p>
+                    <p className="mx-auto mt-2 max-w-lg text-xs leading-5 text-slate-500">{L("Run the first report after reviewing the available documents. It will become the first immutable version in the history.", "Corre el primer reporte después de revisar los documentos disponibles. Se convertirá en la primera versión inmutable del historial.")}</p>
+                  </div>
+                )}
+              </article>
+            </div>
+            {agentError ? <p className="mt-4 text-xs text-rose-300">{agentError}</p> : null}
+          </section>
+        ) : null}
+
+        {activeWorkspaceTab === "research" && researchProfileTab === "thesis" ? (
+          <section className="border-y border-violet-400/25 bg-violet-400/[0.025] px-4 py-5 sm:px-5">
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
+              <div>
+                <div className="flex items-center gap-2">
+                  <BookOpen className="h-4 w-4 text-violet-300" />
+                  <h2 className="text-lg font-semibold text-slate-100">{L("Living Thesis & Research Notes", "Tesis viva y notas")}</h2>
+                </div>
+                <div className="mt-4 border-y border-slate-800 py-4">
+                  <p className="text-[11px] font-semibold uppercase text-violet-300">{L("Neuro's current interpretation", "Interpretación actual de Neuro")}</p>
+                  <p className="mt-2 text-sm leading-7 text-slate-300">{currentResearchView || L("No evidence-backed interpretation exists yet.", "Todavía no existe una interpretación respaldada por evidencia.")}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${systemDispositionTone(currentDecisionSupport?.systemDisposition?.code)}`}>{systemDispositionLabel(currentDecisionSupport?.systemDisposition?.code)}</span>
+                    {investmentThesisReview?.classification ? <span className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${thesisClassificationTone(investmentThesisReview.classification)}`}>{investmentThesisReview.classification.replaceAll("_", " ")}</span> : null}
+                  </div>
+                </div>
+
+                <label className="mt-4 block">
+                  <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Add research context", "Añadir contexto de research")}</span>
+                  <textarea value={thesisContextNote} onChange={(event) => setThesisContextNote(event.target.value)} rows={4} placeholder={L("Record an observation, question, company development, or thesis concern.", "Registra una observación, pregunta, desarrollo de la compañía o preocupación sobre la tesis.")} className="mt-2 w-full resize-none rounded-lg border border-slate-800 bg-slate-950/65 px-3 py-3 text-sm leading-6 text-slate-100 outline-none focus:border-violet-400" />
+                </label>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label>
+                    <span className="text-[10px] font-semibold uppercase text-slate-600">{L("Impact", "Impacto")}</span>
+                    <select value={thesisImpact} onChange={(event) => setThesisImpact(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-200 outline-none">
+                      <option value="strengthens">{L("Strengthens thesis", "Fortalece tesis")}</option>
+                      <option value="weakens">{L("Weakens thesis", "Debilita tesis")}</option>
+                      <option value="uncertain">{L("Uncertain", "Incierto")}</option>
+                      <option value="invalidates">{L("Potentially invalidates", "Puede invalidar")}</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span className="text-[10px] font-semibold uppercase text-slate-600">{L("Source", "Fuente")}</span>
+                    <input value={thesisSourceLabel} onChange={(event) => setThesisSourceLabel(event.target.value)} placeholder={L("Document, release, or observation", "Documento, comunicado u observación")} className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-200 outline-none" />
+                  </label>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => void saveThesisContext()} disabled={thesisSaving || !thesisContextNote.trim()} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-violet-300 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-violet-200 disabled:opacity-50">
+                    {thesisSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    {L("Save note", "Guardar nota")}
+                  </button>
+                  <button type="button" onClick={stageThesisUpdateQuestion} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-violet-400/50 px-4 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-400/10">
+                    <Sparkles className="h-4 w-4" />
+                    {L("Prepare thesis review", "Preparar revisión")}
+                  </button>
+                </div>
+                {thesisStatus ? <p className="mt-3 text-xs text-emerald-300">{thesisStatus}</p> : null}
+                {thesisError ? <p className="mt-3 text-xs text-rose-300">{thesisError}</p> : null}
+
+                <div className="mt-6 border-t border-slate-800 pt-4">
+                  <p className="text-xs font-semibold uppercase text-slate-500">{L("Ask Neuro about this company", "Preguntar a Neuro sobre esta compañía")}</p>
+                  <textarea value={agentQuestion} onChange={(event) => setAgentQuestion(event.target.value)} rows={3} placeholder={L("Ask about evidence, valuation, risks, or what changed.", "Pregunta sobre evidencia, valoración, riesgos o qué cambió.")} className="mt-3 w-full resize-none rounded-lg border border-slate-800 bg-slate-950/65 px-3 py-3 text-sm leading-6 text-slate-100 outline-none focus:border-violet-400" />
+                  <button type="button" onClick={() => void askNeuroResearchAgent()} disabled={agentQaLoading || !agentQuestion.trim()} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-lg border border-violet-400/50 px-4 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-400/10 disabled:opacity-50">
+                    {agentQaLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquareText className="h-4 w-4" />}
+                    {L("Ask Neuro", "Preguntar a Neuro")}
+                  </button>
+                  {agentQaError ? <p className="mt-3 text-xs text-rose-300">{agentQaError}</p> : null}
+                  {agentConversation[0] ? <div className="mt-4 border-l-2 border-violet-400 pl-4"><p className="text-xs font-semibold text-violet-200">{agentConversation[0].question}</p><p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-300">{agentConversation[0].answer}</p></div> : null}
+                </div>
+              </div>
+
+              <aside className="border-t border-slate-800 pt-4 xl:border-t-0 xl:border-l xl:pl-5">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase text-slate-500">{L("Research memory", "Memoria de research")}</p>
+                  <span className="text-xs text-slate-600">{thesisNotes.length}</span>
+                </div>
+                <div className="mt-3 max-h-[720px] divide-y divide-slate-800 overflow-auto">
+                  {thesisNotes.map((note) => (
+                    <article key={note.id} className="py-4">
+                      <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase text-slate-600">
+                        <span>{String(note.payload?.impact ?? "uncertain")}</span>
+                        <span>/</span>
+                        <span>{note.created_at ? new Date(note.created_at).toLocaleDateString(localeTag) : "-"}</span>
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-slate-300">{String(note.payload?.note ?? "")}</p>
+                      {note.payload?.sourceLabel ? <p className="mt-2 text-[11px] text-slate-600">{note.payload.sourceLabel}</p> : null}
+                    </article>
+                  ))}
+                  {!thesisNotes.length ? <p className="py-8 text-sm leading-6 text-slate-500">{L("Notes, observations, and thesis changes will build a permanent timeline here.", "Las notas, observaciones y cambios de tesis crearán una línea de tiempo permanente aquí.")}</p> : null}
+                </div>
+              </aside>
+            </div>
+          </section>
+        ) : null}
+
+        <div className={activeWorkspaceTab !== "research" || researchProfileTab === "analysis" ? "contents" : "hidden"}>
 
         <section className={activeWorkspaceTab === "research" ? "grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]" : "hidden"}>
           <div className="rounded-xl border border-emerald-500/25 bg-slate-900/85 p-5 shadow-lg shadow-slate-950/20">
@@ -5288,7 +6023,6 @@ export default function NeuroAnalysisPage() {
                       { key: "quality_compounder", name: "Quality Compounder" },
                       { key: "value_candidate", name: "Value Candidate" },
                       { key: "quality_at_reasonable_price", name: "Quality at a Reasonable Price" },
-                      { key: "price_dislocation", name: "Price Dislocation" },
                       { key: "balance_sheet_strength", name: "Balance Sheet Strength" },
                     ]).map((template) => (
                       <option key={template.key} value={template.key}>{template.name}</option>
@@ -5321,31 +6055,45 @@ export default function NeuroAnalysisPage() {
 
               {screenerResult ? (
                 <>
-                  <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
                     <Readout label={L("Sector", "Sector")} value={screenerResult.sectorLabel} />
-                    <Readout label={L("Median FCF yield", "FCF yield mediana")} value={formatPercent(screenerResult.summary?.medianFcfYield, localeTag)} />
-                    <Readout label={L("Median forward P/E", "Forward P/E mediana")} value={formatCompactNumber(screenerResult.summary?.medianForwardPE, localeTag)} />
+                    <Readout label={L("Average coverage", "Cobertura promedio")} value={formatPercent((screenerResult.summary?.averageDataCompletenessPct ?? 0) / 100, localeTag)} />
+                    <Readout label={L("Full coverage", "Cobertura completa")} value={screenerResult.summary?.fullCoverage ?? 0} />
                     <Readout label={L("Passed all criteria", "Cumplen todos los criterios")} value={screenerResult.summary?.passedAllRequiredCriteria ?? 0} />
+                    <Readout label={L("Need verified data", "Necesitan data verificada")} value={screenerResult.summary?.insufficientData ?? 0} />
+                  </div>
+
+                  <div className="mt-4 rounded-lg border border-sky-500/20 bg-sky-500/5 px-4 py-3 text-xs leading-5 text-slate-300">
+                    <p className="font-semibold text-sky-200">
+                      {L(
+                        `${screenerResult.template.name} checks ${screenerResult.template.criteria?.length ?? 0} required financial conditions.`,
+                        `${screenerResult.template.name} verifica ${screenerResult.template.criteria?.length ?? 0} condiciones financieras requeridas.`
+                      )}
+                    </p>
+                    <p className="mt-1 text-slate-400">
+                      {L(
+                        "Market prices come from the configured market-data services; company fundamentals prioritize SEC Company Facts. A missing input blocks only that rule and is explained below.",
+                        "Los precios vienen de los servicios de mercado configurados; los fundamentos de compañías priorizan SEC Company Facts. Un insumo faltante bloquea solamente esa regla y su causa se explica abajo."
+                      )}
+                    </p>
                   </div>
 
                   <div className="mt-5 overflow-x-auto rounded-lg border border-slate-800">
-                    <table className="w-full min-w-[1120px] text-left text-sm">
+                    <table className="w-full min-w-[820px] text-left text-sm">
                       <thead className="bg-slate-950/55 text-xs text-slate-500">
                         <tr>
                           <th className="px-3 py-2">{L("Company", "Compañía")}</th>
                           <th className="px-3 py-2">{L("Screen result", "Resultado")}</th>
                           <th className="px-3 py-2">{L("Data coverage", "Cobertura de data")}</th>
                           <th className="px-3 py-2">{L("Criteria", "Criterios")}</th>
-                          <th className="px-3 py-2">{L("FCF yield", "FCF yield")}</th>
-                          <th className="px-3 py-2">{L("Forward P/E", "Forward P/E")}</th>
-                          <th className="px-3 py-2">{L("Revenue CAGR", "Revenue CAGR")}</th>
-                          <th className="px-3 py-2">{L("FCF margin", "Margen FCF")}</th>
                           <th className="px-3 py-2"></th>
                         </tr>
                       </thead>
                       <tbody>
-                        {screenerResult.rows.map((row) => (
-                          <tr key={row.ticker} className="border-t border-slate-800">
+                        {screenerResult.rows.map((row) => {
+                          const missingCriteria = row.criteria.filter((criterion) => criterion.status === "DATA_NOT_AVAILABLE");
+                          return (
+                          <tr key={row.ticker} className="border-t border-slate-800 align-top">
                             <td className="px-3 py-2">
                               <p className="font-semibold text-slate-100">{row.ticker}</p>
                               <p className="max-w-[240px] truncate text-xs text-slate-500">{row.name}</p>
@@ -5357,7 +6105,13 @@ export default function NeuroAnalysisPage() {
                                   ? L("NEEDS DATA", "FALTA DATA")
                                   : L("CRITERIA FAILED", "NO CUMPLE")}
                             </td>
-                            <td className="px-3 py-2 text-slate-300">{formatPercent(row.dataCompletenessPct / 100, localeTag)}</td>
+                            <td className="px-3 py-2 text-slate-300">
+                              <p className="font-semibold">{formatPercent(row.dataCompletenessPct / 100, localeTag)}</p>
+                              <p className="mt-1 max-w-[190px] text-[10px] leading-4 text-slate-500">
+                                {row.fundamentalsSource || L("Source unavailable", "Fuente no disponible")}
+                                {row.latestFiscalPeriod ? ` · ${row.latestFiscalPeriod}` : ""}
+                              </p>
+                            </td>
                             <td className="px-3 py-2">
                               <div className="flex max-w-[300px] flex-wrap gap-1">
                                 {row.criteria.map((criterion) => (
@@ -5366,15 +6120,34 @@ export default function NeuroAnalysisPage() {
                                     title={criterion.explanation}
                                     className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${criterion.status === "PASS" ? "border-emerald-500/30 text-emerald-300" : criterion.status === "FAIL" ? "border-rose-500/30 text-rose-300" : "border-amber-500/30 text-amber-300"}`}
                                   >
-                                    {criterion.label}: {criterion.status === "DATA_NOT_AVAILABLE" ? "N/A" : criterion.status}
+                                    {criterion.label}: {criterion.status === "DATA_NOT_AVAILABLE"
+                                      ? L("NO DATA", "SIN DATA")
+                                      : `${criterion.status} · ${formatScreeningMetric(criterion.metricKey, criterion.actualValue, localeTag)}`}
                                   </span>
                                 ))}
                               </div>
+                              {missingCriteria.length ? (
+                                <details className="mt-2 max-w-[320px] text-[11px] text-amber-200">
+                                  <summary className="cursor-pointer font-semibold">
+                                    {L(
+                                      `Why ${missingCriteria.length} ${missingCriteria.length === 1 ? "input is" : "inputs are"} missing`,
+                                      `Por qué faltan ${missingCriteria.length} ${missingCriteria.length === 1 ? "dato" : "datos"}`
+                                    )}
+                                  </summary>
+                                  <div className="mt-2 space-y-2 text-slate-400">
+                                    {missingCriteria.map((criterion) => (
+                                      <p key={criterion.key}>
+                                        <span className="font-semibold text-slate-300">{criterion.label}:</span>{" "}
+                                        {criterion.diagnostic?.unavailableReason || L(
+                                          "The configured sources did not return a verifiable value.",
+                                          "Las fuentes configuradas no devolvieron un valor verificable."
+                                        )}
+                                      </p>
+                                    ))}
+                                  </div>
+                                </details>
+                              ) : null}
                             </td>
-                            <td className="px-3 py-2 text-slate-300">{formatPercent(row.fcfYield, localeTag)}</td>
-                            <td className="px-3 py-2 text-slate-300">{formatCompactNumber(row.forwardPE ?? row.trailingPE, localeTag)}</td>
-                            <td className="px-3 py-2 text-slate-300">{formatPercent(row.revenueCagr, localeTag)}</td>
-                            <td className="px-3 py-2 text-slate-300">{formatPercent(row.fcfMargin, localeTag)}</td>
                             <td className="px-3 py-2">
                               <button
                                 type="button"
@@ -5385,7 +6158,8 @@ export default function NeuroAnalysisPage() {
                               </button>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -7775,6 +8549,7 @@ export default function NeuroAnalysisPage() {
               )}
             </p>
           </div>
+        </div>
         </div>
       </div>
     </main>

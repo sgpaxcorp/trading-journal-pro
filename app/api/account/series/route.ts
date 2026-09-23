@@ -276,6 +276,9 @@ async function getGrowthPlanRow(
 
   for (const table of tables) {
     const fallback = await queryGrowthPlanTable(table, email, accountId);
+    // Current growth_plans.user_id is UUID. The email fallback only exists for
+    // legacy text-keyed tables, so an invalid UUID means "not applicable".
+    if (fallback.error?.code === "22P02") continue;
     if (fallback.error && fallback.error.code !== "42P01") throw fallback.error;
     if (fallback.data.length > 0) return fallback.data[0] ?? null;
   }

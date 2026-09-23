@@ -33,6 +33,26 @@ describe("dashboard coach plan freshness", () => {
     expect(source.sessions.map((session) => session.date)).toEqual(["2026-09-14", "2026-09-13"]);
   });
 
+  it("does not treat an explicitly not-traded day as a coaching session", () => {
+    const source = buildDashboardCoachSource({
+      account,
+      plan,
+      asOfDate: "2026-09-17",
+      entries: [
+        {
+          date: "2026-09-17",
+          pnl: 0,
+          notes: JSON.stringify({ session_status: "not_traded" }),
+          tags: ["NTJ:NOT_TRADED"],
+        },
+        { date: "2026-09-16", pnl: 40, respected_plan: true },
+      ],
+    });
+
+    expect(source.latestSessionDate).toBe("2026-09-16");
+    expect(source.sessions.map((session) => session.date)).toEqual(["2026-09-16"]);
+  });
+
   it("changes the signature when a new session or correction arrives", () => {
     const friday = buildDashboardCoachSource({
       account,
@@ -159,6 +179,16 @@ describe("dashboard coach plan freshness", () => {
 
 describe("daily money goal status", () => {
   it("distinguishes no activity, in progress, met, and paused", () => {
+    expect(
+      resolveDailyGoalStatus({
+        hasPlan: true,
+        isTradingDay: true,
+        expectedUsd: 100,
+        actualUsd: 0,
+        hasSession: true,
+        isNotTraded: true,
+      })
+    ).toBe("not_traded");
     expect(
       resolveDailyGoalStatus({
         hasPlan: true,

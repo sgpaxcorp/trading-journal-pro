@@ -12,6 +12,9 @@ export async function GET(req: NextRequest) {
       isAdmin: true,
       userId: admin.user.id,
       email: admin.user.email ?? null,
+      role: admin.access.role,
+      permissions: admin.access.permissions,
+      source: admin.access.source,
     });
   } catch (err: any) {
     return NextResponse.json(

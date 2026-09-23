@@ -150,13 +150,33 @@ for row, values in zip(summary.rows, summary_data):
 heading = doc.add_heading("1 Physical device screen recording", level=1)
 keep_with_next(heading)
 doc.add_paragraph(
-    "A separate uninterrupted recording captured on a physical iPhone running the latest available iOS version is attached to the Resolution Center reply. It begins from the iPhone Home Screen with a cold app launch and shows the normal review flow."
+    "A separate uninterrupted recording captured on a physical iPhone running the latest available iOS version is attached to the Resolution Center reply. It begins from the iPhone Home Screen with a cold app launch. The sequence below explains what is shown and what each part confirms for App Review."
 )
-add_bullet(doc, "Launch Neuro Trader and show that the first screen is Sign in, with no account-creation or payment control.")
-add_bullet(doc, "Log in with the main review account and open Business Center, Trading Business Plan, Execution Journal, P&L, KPIs, Business Notebook, AI Coach, Settings, legal links, and sign out.")
-add_bullet(doc, "Show paid-feature access through the preauthorized review account. No purchase is performed in the iOS app.")
-add_bullet(doc, "Log in with the disposable deletion account and complete Settings, Danger zone, Delete account, including the email, DELETE phrase, and both confirmations.")
-add_bullet(doc, "The app has no public feed or public user-generated content. Journals, notebook entries, screenshots, and AI conversations are private to the authenticated account, so public reporting and blocking mechanisms do not apply.")
+video_label = doc.add_paragraph()
+video_label.paragraph_format.space_before = Pt(3)
+video_label.add_run("Sequence shown in the attached video").bold = True
+add_step(doc, 1, "The recording starts on the physical iPhone Home Screen and opens Neuro Trader from a fully closed state. This confirms a normal cold launch of the submitted app.")
+add_step(doc, 2, "The first app screen is Sign in. The recording pauses here to show that the iOS app has no account-registration, pricing, checkout, upgrade, payment, or external purchase-link control.")
+add_step(doc, 3, "The reviewer signs in with the main review account appreview@neurotrader-journal.com. The exact password is listed in Section 3 of this document.")
+add_step(doc, 4, "Business Center opens with the preloaded Two-Year Growth Demo account. This is synthetic App Review data and is not a customer performance claim.")
+add_step(doc, 5, "Trading Business Plan shows the simulated $10,000 starting balance, $250,000 target, two-year dates, risk limits, and completed-cycle recommendation.")
+add_step(doc, 6, "Prepare recommended cycle is opened to demonstrate that the next cycle is prefilled from existing evidence and does not automatically increase risk. The demo plan is not overwritten or saved during the recording.")
+add_step(doc, 7, "The native Back and Return to Business Center controls are shown. The reviewer then opens P&L and the September 10, 2026 Execution Journal entry to inspect populated stock, listed option-contract, cryptocurrency, and foreign-exchange transactions, private execution notes, and completed review fields.")
+add_step(doc, 8, "KPIs shows the objective performance measurements and drawdown calculated from the synthetic review records.")
+add_step(doc, 9, "Business Notebook shows the private operating book and one sample page. These records are visible only to the authenticated account.")
+add_step(doc, 10, "AI Coach receives the prompt Analyze my two-year plan objectively and returns an educational response grounded in the account's selected plan and private records.")
+add_step(doc, 11, "Settings shows notification choices, Privacy Policy, Terms and Conditions, Contact support, workspace reset, permanent account deletion, and Sign out.")
+add_step(doc, 12, "The reviewer signs out of the main account.")
+add_step(doc, 13, "The reviewer signs in with the disposable deletion account appreview-delete@neurotrader-journal.com. Its exact password is also listed in Section 3.")
+add_step(doc, 14, "In Settings, Danger zone, Delete account, the reviewer enters the disposable email address and the word DELETE, then completes both native confirmation dialogs.")
+add_step(doc, 15, "The app returns to the Sign in screen, confirming completion of the permanent account-deletion flow. The recording ends at this point.")
+
+video_takeaway = doc.add_paragraph()
+video_takeaway.paragraph_format.space_before = Pt(4)
+video_takeaway.add_run("What the recording confirms: ").bold = True
+video_takeaway.add_run(
+    "the submitted iOS app provides authenticated access to an existing NeuroTrader membership without in-app commerce; all displayed review data is synthetic; journals, notebook entries, screenshots, and AI conversations are private; and permanent account deletion is available inside the app. The product has no public feed or public user-generated content, so public reporting and blocking mechanisms do not apply."
+)
 
 heading = doc.add_heading("2 Purpose target audience problem and value", level=1)
 keep_with_next(heading)
@@ -169,22 +189,14 @@ doc.add_paragraph(
 
 heading = doc.add_heading("3 Setup access and main feature instructions", level=1)
 keep_with_next(heading)
-add_step(doc, 1, "Install and launch the latest submitted build. No sample-file upload is required.")
-add_step(doc, 2, "At Sign in, use the main review email appreview@neurotrader-journal.com and the password entered in App Store Connect Review Notes.")
-add_step(doc, 3, "Business Center opens with the preloaded Two-Year Growth Demo personal account.")
-add_step(doc, 4, "Open Trading Business Plan to review the simulated $10,000 starting balance, $250,000 target, two-year dates, risk limits, checkpoints, and completed-cycle continuation recommendation.")
-add_step(doc, 5, "Open P&L and September 7, 2026 in Execution Journal to inspect populated stock, listed option-contract, crypto, and forex transactions.")
-add_step(doc, 6, "Open KPIs, Business Notebook, and Coach. A suggested coach question is Analyze my two-year plan objectively.")
-add_step(doc, 7, "Open Settings to inspect notification consent, Privacy Policy, Terms and Conditions, support, sign out, workspace reset, and permanent account deletion.")
-add_step(doc, 8, "For deletion testing, sign out and use appreview-delete@neurotrader-journal.com with the same review password. Complete the Delete account flow in Settings.")
-
-credentials = doc.add_table(rows=4, cols=2)
+credentials = doc.add_table(rows=5, cols=2)
 credentials.alignment = WD_TABLE_ALIGNMENT.CENTER
 credentials.style = "Table Grid"
 credential_data = [
     ("Main review email", "appreview@neurotrader-journal.com"),
+    ("Main review password", "UxjsjvB0ZFimdxdwbAzNci26"),
     ("Deletion test email", "appreview-delete@neurotrader-journal.com"),
-    ("Password", "Enter the Keychain-stored review password in App Store Connect only"),
+    ("Deletion test password", "UxjsjvB0ZFimdxdwbAzNci26"),
     ("Sample files", "Not required; synthetic review data is preloaded"),
 ]
 for row, values in zip(credentials.rows, credential_data):
@@ -194,6 +206,15 @@ for row, values in zip(credentials.rows, credential_data):
         if index == 0:
             set_cell_fill(row.cells[index], PALE)
             row.cells[index].paragraphs[0].runs[0].bold = True
+
+add_step(doc, 1, "Install and launch the latest submitted build. No sample-file upload is required.")
+add_step(doc, 2, "At Sign in, use the main review email appreview@neurotrader-journal.com and password UxjsjvB0ZFimdxdwbAzNci26.")
+add_step(doc, 3, "Business Center opens with the preloaded Two-Year Growth Demo personal account.")
+add_step(doc, 4, "Open Trading Business Plan to review the simulated $10,000 starting balance, $250,000 target, two-year dates, risk limits, checkpoints, and completed-cycle continuation recommendation.")
+add_step(doc, 5, "Open P&L and September 10, 2026 in Execution Journal to inspect populated stock, listed option-contract, crypto, and forex transactions.")
+add_step(doc, 6, "Open KPIs, Business Notebook, and Coach. A suggested coach question is Analyze my two-year plan objectively.")
+add_step(doc, 7, "Open Settings to inspect notification consent, Privacy Policy, Terms and Conditions, support, sign out, workspace reset, and permanent account deletion.")
+add_step(doc, 8, "For deletion testing, sign out and use appreview-delete@neurotrader-journal.com with password UxjsjvB0ZFimdxdwbAzNci26. Complete the Delete account flow in Settings.")
 
 heading = doc.add_heading("4 External services tools and platforms", level=1)
 keep_with_next(heading)
@@ -231,11 +252,6 @@ add_bullet(doc, "Support URL: https://www.neurotrader-journal.com/contact")
 add_bullet(doc, "Privacy Policy URL: https://www.neurotrader-journal.com/privacy")
 add_bullet(doc, "Terms and Conditions URL: https://www.neurotrader-journal.com/terms")
 add_bullet(doc, "All preloaded balances, trades, journals, metrics, and outcomes are synthetic and labeled for demonstration and App Review only.")
-
-closing = doc.add_paragraph()
-closing.paragraph_format.space_before = Pt(10)
-closing.add_run("Submitted by SG PAX Corp\n").bold = True
-closing.add_run("NeuroTrader Product Team")
 
 doc.core_properties.title = "NeuroTrader App Review Response and Access Guide"
 doc.core_properties.subject = "Apple App Review requested information"

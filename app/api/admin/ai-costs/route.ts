@@ -204,7 +204,7 @@ async function loadDashboard() {
 
 export async function GET(req: NextRequest) {
   try {
-    const admin = await requireAdminUser(req, { action: "ai-costs:read", limit: 60, windowMs: 60_000 });
+    const admin = await requireAdminUser(req, { action: "ai-costs:read", permission: "finance.read", limit: 60, windowMs: 60_000 });
     if (!admin.ok) return admin.response;
     return NextResponse.json(await loadDashboard());
   } catch (error: any) {
@@ -215,7 +215,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const admin = await requireAdminUser(req, { action: "ai-costs:write", limit: 20, windowMs: 10 * 60_000 });
+    const admin = await requireAdminUser(req, { action: "ai-costs:write", permission: "finance.write", limit: 20, windowMs: 10 * 60_000 });
     if (!admin.ok) return admin.response;
     const body = await req.json().catch(() => ({}));
     const settings = normalizeSettings(body?.settings);

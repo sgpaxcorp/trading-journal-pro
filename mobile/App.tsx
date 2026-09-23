@@ -642,6 +642,7 @@ function AppShell() {
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [shouldOpenResetScreen, setShouldOpenResetScreen] = useState(false);
   const lastNotificationResponseId = useRef<string | null>(null);
+  const pendingAuthResetRef = useRef(false);
   const { colors, mode: themeMode } = useTheme();
   const { language } = useLanguage();
   const loadingStyles = useMemo(
@@ -906,21 +907,44 @@ function AppShell() {
     ? "PaymentRequired"
     : "Auth";
 
-  const handleSignOut = useCallback(() => {
-    void supabaseMobile?.auth.signOut();
-    setSession(null);
-    setHasAppAccess(false);
-    setAccessReady(true);
-    setAccessError(null);
-    setLegalStatus(null);
-    setLegalReady(false);
-    setLegalError(null);
-    if (navigationRef.isReady()) {
+  useEffect(() => {
+    if (!navReady || !authReady || postAuthRoute !== "Auth" || !navigationRef.isReady()) return;
+
+    const currentRoute = navigationRef.getCurrentRoute()?.name;
+    if (currentRoute === "Auth" || currentRoute === "ResetPassword") {
+      pendingAuthResetRef.current = false;
+      return;
+    }
+
+    if (!session?.user?.id || pendingAuthResetRef.current) {
+      pendingAuthResetRef.current = false;
       navigationRef.reset({
         index: 0,
         routes: [{ name: "Auth" }],
       });
     }
+  }, [authReady, navReady, postAuthRoute, session?.user?.id]);
+
+  const handleSignOut = useCallback(async () => {
+    pendingAuthResetRef.current = true;
+    if (supabaseMobile) {
+      try {
+        await supabaseMobile.auth.signOut({ scope: "local" });
+      } catch (err) {
+        console.warn("[mobile] local sign out failed; clearing app state anyway:", err);
+      }
+    }
+    setSession(null);
+    setAuthReady(true);
+    setHasAppAccess(false);
+    setAccessReady(true);
+    setAccessError(null);
+    setLegalStatus(null);
+    setLegalReady(true);
+    setLegalError(null);
+    setRecoveryError(null);
+    setRecoverySessionReady(false);
+    setShouldOpenResetScreen(false);
   }, []);
 
   const handleLegalAccept = useCallback(async () => {
@@ -1040,7 +1064,7 @@ function AppShell() {
             options={({ route }) => ({ title: route.params.title })}
           />
           <Stack.Screen name="Settings" options={{ title: t(language, "Settings", "Ajustes") }}>
-            {() => <SettingsScreen onAccountDeleted={handleSignOut} />}
+            {() => <SettingsScreen onAccountDeleted={handleSignOut} onSignOut={handleSignOut} />}
           </Stack.Screen>
           <Stack.Screen
             name="JournalDate"

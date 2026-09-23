@@ -10,11 +10,12 @@ export type AdminAuditParams = {
   action: string;
   targetUserId?: string | null;
   metadata?: Record<string, unknown>;
+  required?: boolean;
 };
 
 export async function recordAdminAuditEvent(params: AdminAuditParams) {
   try {
-    await supabaseAdmin.from("admin_audit_events").insert({
+    const { error } = await supabaseAdmin.from("admin_audit_events").insert({
       admin_user_id: params.adminUserId,
       admin_email: params.adminEmail ?? null,
       action: params.action,
@@ -24,8 +25,14 @@ export async function recordAdminAuditEvent(params: AdminAuditParams) {
       user_agent: params.req.headers.get("user-agent") || null,
       created_at: new Date().toISOString(),
     });
+    if (error) throw error;
+    return true;
   } catch (error) {
     console.warn("[admin-audit] failed to record event:", error);
+    if (params.required) {
+      throw new Error("The administrative action was blocked because its audit record could not be secured.");
+    }
+    return false;
   }
 }
 

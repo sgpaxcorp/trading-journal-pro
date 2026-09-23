@@ -85,8 +85,11 @@ export type NeuroMarketData = {
     netDeferredTaxes?: number | null;
     changeInWorkingCapital?: number | null;
     totalAssets?: number | null;
+    currentAssets?: number | null;
+    currentLiabilities?: number | null;
     pretaxIncome?: number | null;
     incomeTaxExpense?: number | null;
+    interestExpense?: number | null;
     cashAndCashEquivalents?: number | null;
     dilutedEPS?: number | null;
     totalDebt?: number | null;
@@ -109,6 +112,7 @@ export type NeuroMarketData = {
     degraded?: boolean;
     profileSource?: string | null;
     priceSource?: string | null;
+    marketCapSource?: string | null;
     fundamentalsSource?: string | null;
     providerStatuses?: NeuroExternalProviderStatus[];
     messages?: string[];
@@ -153,8 +157,11 @@ const FUNDAMENTAL_TYPES = [
   "annualDeferredTaxLiabilities",
   "annualChangeInWorkingCapital",
   "annualTotalAssets",
+  "annualCurrentAssets",
+  "annualCurrentLiabilities",
   "annualPretaxIncome",
   "annualTaxProvision",
+  "annualInterestExpense",
   "annualCashCashEquivalentsAndShortTermInvestments",
   "annualDilutedEPS",
   "annualTotalDebt",
@@ -349,7 +356,7 @@ function parseNasdaqHistoricalRows(history: any) {
 
 async function fetchNasdaqAssetClass(ticker: string, assetClass: "stocks" | "etf") {
   const symbol = normalizeTickerForNasdaq(ticker);
-  const [info, history] = await Promise.all([
+  const [info, history, summary] = await Promise.all([
     fetchJson(
       `https://api.nasdaq.com/api/quote/${encodeURIComponent(symbol)}/info?assetclass=${assetClass}`,
       NASDAQ_HEADERS
@@ -360,11 +367,16 @@ async function fetchNasdaqAssetClass(ticker: string, assetClass: "stocks" | "etf
       )}/historical?assetclass=${assetClass}&fromdate=${yearsAgoIsoDate(5)}&todate=${todayIsoDate()}&limit=9999`,
       NASDAQ_HEADERS
     ).catch((error) => ({ error: error.message })),
+    fetchJson(
+      `https://api.nasdaq.com/api/quote/${encodeURIComponent(symbol)}/summary?assetclass=${assetClass}`,
+      NASDAQ_HEADERS
+    ).catch((error) => ({ error: error.message })),
   ]);
 
   const infoData = info?.data ?? null;
+  const summaryData = summary?.data?.summaryData ?? null;
   const priceRows = parseNasdaqHistoricalRows(history);
-  const hasUsableInfo = Boolean(infoData?.symbol || infoData?.primaryData || infoData?.secondaryData);
+  const hasUsableInfo = Boolean(infoData?.symbol || infoData?.primaryData || infoData?.secondaryData || summaryData);
   if (!hasUsableInfo && !priceRows.length) {
     throw new Error(info?.error || history?.error || `No ${assetClass} market data returned.`);
   }
@@ -382,9 +394,9 @@ async function fetchNasdaqAssetClass(ticker: string, assetClass: "stocks" | "etf
     company: {
       name: infoData?.companyName ?? ticker,
       shortName: infoData?.companyName ?? null,
-      exchange: infoData?.exchange ?? null,
-      sector: null,
-      industry: null,
+      exchange: infoData?.exchange ?? summaryData?.Exchange?.value ?? null,
+      sector: summaryData?.Sector?.value ?? null,
+      industry: summaryData?.Industry?.value ?? null,
       quoteType,
       currency: "USD",
     },
@@ -393,12 +405,12 @@ async function fetchNasdaqAssetClass(ticker: string, assetClass: "stocks" | "etf
       fiftyTwoWeekHigh: range.high,
       fiftyTwoWeekLow: range.low,
       regularMarketVolume: rawNumber(infoData?.primaryData?.volume),
-      previousClose: secondaryPrice ?? latestHistoryPrice,
-      marketCap: null,
+      previousClose: rawNumber(summaryData?.PreviousClose?.value) ?? secondaryPrice ?? latestHistoryPrice,
+      marketCap: rawNumber(summaryData?.MarketCap?.value),
       trailingPE: null,
       forwardPE: null,
       priceToBook: null,
-      dividendYield: null,
+      dividendYield: rawNumber(summaryData?.Yield?.value),
     },
     annualFundamentals: [],
     priceHistory: priceRows,
@@ -412,6 +424,7 @@ async function fetchNasdaqAssetClass(ticker: string, assetClass: "stocks" | "etf
     errors: {
       nasdaqInfo: info?.error ?? null,
       nasdaqHistory: history?.error ?? null,
+      nasdaqSummary: summary?.error ?? null,
     },
   } satisfies NeuroMarketData;
 }
@@ -437,6 +450,14 @@ type SecTickerRow = {
 };
 
 let secTickerIndexPromise: Promise<Record<string, SecTickerRow>> | null = null;
+const SEC_FUNDAMENTALS_CACHE_MS = 60 * 60 * 1_000;
+const secFundamentalsCache = new Map<string, {
+  expiresAt: number;
+  value: {
+    company: { name: string; exchange: string | null; quoteType: string };
+    annualFundamentals: NeuroMarketData["annualFundamentals"];
+  };
+}>();
 
 async function secTickerIndex() {
   if (!secTickerIndexPromise) {
@@ -602,6 +623,16 @@ function buildSecAnnualRows(companyFacts: any) {
     factUnits(companyFacts, "us-gaap", ["IncreaseDecreaseInOperatingAssetsAndLiabilities", "IncreaseDecreaseInOperatingCapital"], ["USD"])
   );
   const totalAssets = instantFactMap(factUnits(companyFacts, "us-gaap", ["Assets"], ["USD"]));
+  const currentAssets = instantFactMap(factUnits(companyFacts, "us-gaap", ["AssetsCurrent"], ["USD"]));
+  const currentLiabilities = instantFactMap(factUnits(companyFacts, "us-gaap", ["LiabilitiesCurrent"], ["USD"]));
+  const interestExpense = annualFactMap(
+    factUnits(
+      companyFacts,
+      "us-gaap",
+      ["InterestExpenseNonOperating", "InterestAndDebtExpense", "InterestExpense"],
+      ["USD"]
+    )
+  );
   const cashAndCashEquivalents = instantFactMap(
     factUnits(
       companyFacts,
@@ -645,6 +676,9 @@ function buildSecAnnualRows(companyFacts: any) {
         ...Object.keys(pretaxIncome),
         ...Object.keys(incomeTaxExpense),
         ...Object.keys(cashAndCashEquivalents),
+        ...Object.keys(currentAssets),
+        ...Object.keys(currentLiabilities),
+        ...Object.keys(interestExpense),
       ].map(Number)
     )
   )
@@ -702,8 +736,11 @@ function buildSecAnnualRows(companyFacts: any) {
           : null,
       changeInWorkingCapital: changeInWorkingCapital[year] ?? null,
       totalAssets: totalAssets[year] ?? null,
+      currentAssets: currentAssets[year] ?? null,
+      currentLiabilities: currentLiabilities[year] ?? null,
       pretaxIncome: pretaxIncome[year] ?? null,
       incomeTaxExpense: incomeTaxExpense[year] ?? null,
+      interestExpense: interestExpense[year] ?? null,
       cashAndCashEquivalents: cashAndCashEquivalents[year] ?? null,
       dilutedEPS: dilutedEPS[year] ?? null,
       totalDebt,
@@ -721,6 +758,8 @@ function buildSecAnnualRows(companyFacts: any) {
 }
 
 async function fetchSecCompanyFallback(ticker: string) {
+  const cached = secFundamentalsCache.get(ticker);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
   const index = await secTickerIndex();
   const entry = index[ticker];
   if (!entry?.cik) throw new Error("SEC ticker not found.");
@@ -730,7 +769,7 @@ async function fetchSecCompanyFallback(ticker: string) {
     SEC_HEADERS,
     { cache: "no-store" }
   );
-  return {
+  const value = {
     company: {
       name: facts?.entityName ?? entry.name ?? ticker,
       exchange: entry.exchange ?? null,
@@ -738,6 +777,8 @@ async function fetchSecCompanyFallback(ticker: string) {
     },
     annualFundamentals: buildSecAnnualRows(facts),
   };
+  secFundamentalsCache.set(ticker, { expiresAt: Date.now() + SEC_FUNDAMENTALS_CACHE_MS, value });
+  return value;
 }
 
 function normalizeWeightings(value: any) {
@@ -843,7 +884,8 @@ const FUNDAMENTAL_FIELDS = [
   "capitalExpenditures", "accountsReceivable", "inventory", "goodwillAndIntangibleAssets",
   "stockBasedCompensation", "dilutedAverageShares", "deferredRevenue", "deferredTaxAssets",
   "deferredTaxLiabilities", "netDeferredTaxes", "changeInWorkingCapital", "totalAssets",
-  "pretaxIncome", "incomeTaxExpense", "cashAndCashEquivalents", "dilutedEPS", "totalDebt",
+  "currentAssets", "currentLiabilities", "pretaxIncome", "incomeTaxExpense", "interestExpense",
+  "cashAndCashEquivalents", "dilutedEPS", "totalDebt",
   "stockholdersEquity", "operatingMargin", "netMargin", "fcfMargin", "debtToEquity",
 ] as const;
 
@@ -909,12 +951,15 @@ export function buildMarketFinancialDataIntegrity(
   const marketDocument = `${ticker} market quote snapshot`;
   for (const [field, label, unitType] of MARKET_FINANCIAL_FIELDS) {
     const isCurrency = unitType.startsWith("currency");
+    const fieldSource = field === "marketCap"
+      ? item.dataQuality?.marketCapSource ?? marketSource
+      : marketSource;
     records.push(financialFact({
       id: financialTraceId(ticker, `market.${field}`),
       path: `market.${field}`,
       label,
       value: item.market?.[field],
-      source: marketSource,
+      source: fieldSource,
       document: marketDocument,
       reportingPeriod: generatedAt,
       publicationDate: generatedAt,
@@ -1065,10 +1110,10 @@ export async function fetchNeuroMarketData(tickerInput: string): Promise<NeuroMa
       ? external.instrumentType
       : instrumentTypeFromQuoteType(preliminaryQuoteType);
 
-  if (preliminaryInstrumentType !== "etf" && preliminaryInstrumentType !== "fund" && !annualFundamentals.length) {
+  if (preliminaryInstrumentType !== "etf" && preliminaryInstrumentType !== "fund") {
     try {
       secFallback = await fetchSecCompanyFallback(ticker);
-      annualFundamentals = secFallback.annualFundamentals;
+      if (secFallback.annualFundamentals.length) annualFundamentals = secFallback.annualFundamentals;
     } catch (error: any) {
       secError = error?.message || "SEC company facts fallback failed.";
     }
@@ -1081,7 +1126,15 @@ export async function fetchNeuroMarketData(tickerInput: string): Promise<NeuroMa
       : instrumentTypeFromQuoteType(quoteType);
   const fundProfile = mergeFundProfiles(buildFundProfile(quoteSummary), external.fund ?? null);
   const priceSource = yahooPriceRows.length ? "primary" : externalPriceRows.length ? "external" : nasdaqFallback?.priceHistory.length ? "fallback" : null;
-  const fundamentalsSource = yahooAnnualFundamentals.length ? "primary" : secFallback?.annualFundamentals.length ? "sec" : null;
+  const marketCapSource =
+    quoteRow?.marketCap != null || searchQuote?.marketCap != null
+      ? "Yahoo Finance"
+      : externalMarket?.marketCap != null
+        ? "Configured external market-data provider"
+        : nasdaqFallback?.market?.marketCap != null
+          ? "Nasdaq"
+          : null;
+  const fundamentalsSource = secFallback?.annualFundamentals.length ? "sec" : yahooAnnualFundamentals.length ? "primary" : null;
   const profileSource =
     searchQuote || quoteRow
       ? "primary"
@@ -1193,6 +1246,7 @@ export async function fetchNeuroMarketData(tickerInput: string): Promise<NeuroMa
       degraded: fallbackMessages.length > 0,
       profileSource,
       priceSource,
+      marketCapSource,
       fundamentalsSource,
       providerStatuses: external.statuses,
       messages: fallbackMessages,

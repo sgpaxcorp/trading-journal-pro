@@ -13,7 +13,13 @@ import { supabaseMobile } from "../lib/supabase";
 import { type ThemeColors } from "../theme";
 import { useTheme } from "../lib/ThemeContext";
 
-export function SettingsScreen({ onAccountDeleted }: { onAccountDeleted?: () => void }) {
+export function SettingsScreen({
+  onAccountDeleted,
+  onSignOut,
+}: {
+  onAccountDeleted?: () => void | Promise<void>;
+  onSignOut?: () => void | Promise<void>;
+}) {
   const { language, setLanguage } = useLanguage();
   const { colors, mode: themeMode, setMode } = useTheme();
   const user = useSupabaseUser();
@@ -41,6 +47,7 @@ export function SettingsScreen({ onAccountDeleted }: { onAccountDeleted?: () => 
   const [deleteEmail, setDeleteEmail] = useState("");
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [signOutLoading, setSignOutLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const deleteConfirmationRef = useRef<TextInput>(null);
   const mountedRef = useRef(true);
@@ -61,16 +68,26 @@ export function SettingsScreen({ onAccountDeleted }: { onAccountDeleted?: () => 
       return;
     }
 
-    const sb = supabaseMobile;
-    const { error } = await sb.auth.signOut();
-    if (error) {
-      Alert.alert(t(language, "Sign out failed", "Error al cerrar sesión"), error.message);
-      return;
+    if (signOutLoading) return;
+    setSignOutLoading(true);
+
+    try {
+      if (onSignOut) {
+        await onSignOut();
+      } else {
+        const { error } = await supabaseMobile.auth.signOut({ scope: "local" });
+        if (error) throw error;
+      }
+    } catch (err: any) {
+      Alert.alert(
+        t(language, "Sign out failed", "Error al cerrar sesión"),
+        err?.message ?? t(language, "Please try again.", "Inténtalo de nuevo.")
+      );
+    } finally {
+      if (mountedRef.current) {
+        setSignOutLoading(false);
+      }
     }
-    Alert.alert(
-      t(language, "Signed out", "Sesión cerrada"),
-      t(language, "Your session has been closed on this device.", "La sesión se cerró en este dispositivo.")
-    );
   }
 
   const loadProfile = useCallback(async () => {
@@ -831,8 +848,14 @@ export function SettingsScreen({ onAccountDeleted }: { onAccountDeleted?: () => 
         </Pressable>
       </View>
 
-      <Pressable style={styles.signOutButton} onPress={handleSignOut}>
-        <Text style={styles.signOutText}>{t(language, "Sign out", "Cerrar sesión")}</Text>
+      <Pressable
+        style={[styles.signOutButton, signOutLoading && styles.saveButtonDisabled]}
+        onPress={handleSignOut}
+        disabled={signOutLoading}
+      >
+        <Text style={styles.signOutText}>
+          {signOutLoading ? t(language, "Signing out…", "Cerrando sesión…") : t(language, "Sign out", "Cerrar sesión")}
+        </Text>
       </Pressable>
     </ScreenScaffold>
   );

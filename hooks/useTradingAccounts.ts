@@ -21,6 +21,31 @@ const accountMemoryCache = new Map<
   string,
   { accounts: TradingAccount[]; activeAccountId: string | null }
 >();
+const defaultAccountCreationInFlight = new Map<string, Promise<TradingAccount>>();
+
+async function createDefaultAccountOnce(userId: string, token: string): Promise<TradingAccount> {
+  const existing = defaultAccountCreationInFlight.get(userId);
+  if (existing) return existing;
+
+  const request = (async () => {
+    const res = await fetch("/api/trading-accounts/create", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ name: "Primary", broker: "", accountType: "personal" }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body?.error || "Failed to create default account");
+    return body.account as TradingAccount;
+  })().finally(() => {
+    defaultAccountCreationInFlight.delete(userId);
+  });
+
+  defaultAccountCreationInFlight.set(userId, request);
+  return request;
+}
 
 function readStoredActiveAccountId(userId: string): string | null {
   if (typeof window === "undefined" || !userId) return null;
@@ -92,8 +117,13 @@ export function useTradingAccounts() {
       rememberAccounts(String(user?.id ?? ""), rows, preferred?.id ?? null);
 
       if (rows.length === 0) {
-        // create a default account
-        await createAccount("Primary", "");
+        // React Strict Mode can start this load twice in development. Share one
+        // creation request so a first visit never produces duplicate accounts.
+        const userId = String(user?.id ?? "");
+        if (userId) {
+          await createDefaultAccountOnce(userId, token);
+          await fetchAccounts();
+        }
       } else if (preferred?.id && preferred.id !== savedActive) {
         await setActive(preferred.id);
       }

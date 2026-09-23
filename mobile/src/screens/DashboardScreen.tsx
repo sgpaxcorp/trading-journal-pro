@@ -126,7 +126,20 @@ type AccountSeriesResponse = {
 type JournalEntry = {
   date?: string | null;
   notes?: string | null;
+  tags?: string[] | null;
 };
+
+const NOT_TRADED_JOURNAL_TAG = "NTJ:NOT_TRADED";
+
+function isNotTradedJournalEntry(entry?: JournalEntry | null) {
+  if (entry?.tags?.includes(NOT_TRADED_JOURNAL_TAG)) return true;
+  try {
+    const parsed = entry?.notes ? JSON.parse(entry.notes) : null;
+    return parsed?.session_status === "not_traded";
+  } catch {
+    return false;
+  }
+}
 
 type JournalListResponse = {
   entries: JournalEntry[];
@@ -1346,12 +1359,16 @@ export function DashboardScreen({
     const percent = Number(plan?.dailyTargetPct ?? 0);
     const startBalance = Math.max(0, currentBalance - todayPnl);
     const targetUsd = percent > 0 ? startBalance * (percent / 100) : 0;
-    const hasActivity = journalEntries.some(
+    const todayEntry = journalEntries.find(
       (entry) => String(entry?.date ?? "").slice(0, 10) === todayStr
     );
+    const isNotTraded = isNotTradedJournalEntry(todayEntry);
+    const hasActivity = Boolean(todayEntry) && !isNotTraded;
     const status =
       targetUsd <= 0
         ? "not_configured"
+        : isNotTraded
+          ? "not_traded"
         : !hasActivity
           ? "no_activity"
           : todayPnl >= targetUsd
@@ -1381,12 +1398,15 @@ export function DashboardScreen({
       date.setDate(sunday.getDate() + idx);
       const iso = date.toISOString().slice(0, 10);
       const pnl = dailyMap.has(iso) ? Number(dailyMap.get(iso)) || 0 : null;
-      return { iso, pnl };
+      const journalEntry = journalEntries.find(
+        (entry) => String(entry?.date ?? "").slice(0, 10) === iso
+      );
+      return { iso, pnl, notTraded: isNotTradedJournalEntry(journalEntry) };
     });
 
     const total = days.reduce((acc, day) => acc + (day.pnl ?? 0), 0);
     return { total, days };
-  }, [dailyMap]);
+  }, [dailyMap, journalEntries]);
 
   const tradingSystem = useMemo(() => {
     const system = plan?.steps?.execution_and_journal?.system ?? {};
@@ -2693,7 +2713,8 @@ export function DashboardScreen({
                         styles.weekCell,
                         isPositive && styles.weekCellWin,
                         isNegative && styles.weekCellLoss,
-                        day.pnl === 0 && styles.weekCellFlat,
+                        day.pnl === 0 && !day.notTraded && styles.weekCellFlat,
+                        day.notTraded && styles.weekCellFlat,
                       ]}
                     >
                       <Text style={styles.weekCellLabel}>
@@ -2702,7 +2723,15 @@ export function DashboardScreen({
                           : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri"][idx]}
                       </Text>
                       <Text style={styles.weekCellValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                        {day.pnl == null ? "—" : day.pnl === 0 ? "$0" : formatSignedShort(day.pnl)}
+                        {day.notTraded
+                          ? language === "es"
+                            ? "No operó"
+                            : "Not Traded"
+                          : day.pnl == null
+                            ? "—"
+                            : day.pnl === 0
+                              ? "$0"
+                              : formatSignedShort(day.pnl)}
                       </Text>
                     </Pressable>
                   );
@@ -2750,6 +2779,8 @@ export function DashboardScreen({
                         ? t(language, "Not reached yet", "Aún no alcanzada")
                         : dailyGoal.status === "no_activity"
                           ? t(language, "No activity yet", "Sin actividad todavía")
+                          : dailyGoal.status === "not_traded"
+                            ? t(language, "Not Traded", "No operado")
                           : t(language, "Set daily goal", "Configurar meta diaria")}
                   </Text>
                 </View>
@@ -2770,18 +2801,26 @@ export function DashboardScreen({
                       todayPnl >= 0 ? styles.dailyGoalPositive : styles.dailyGoalNegative,
                     ]}
                   >
-                    {dailyGoal.status === "not_configured" ? "—" : formatSigned(todayPnl)}
+                    {dailyGoal.status === "not_configured"
+                      ? "—"
+                      : dailyGoal.status === "not_traded"
+                        ? t(language, "Not Traded", "No operado")
+                        : formatSigned(todayPnl)}
                   </Text>
                 </View>
                 <View style={styles.dailyGoalMetric}>
                   <Text style={styles.dailyGoalMetricLabel}>
                     {dailyGoal.status === "met"
                       ? t(language, "Above goal", "Sobre la meta")
+                      : dailyGoal.status === "not_traded"
+                        ? t(language, "Status", "Estado")
                       : t(language, "Remaining", "Falta")}
                   </Text>
                   <Text style={styles.dailyGoalMetricValue}>
                     {dailyGoal.status === "not_configured"
                       ? "—"
+                      : dailyGoal.status === "not_traded"
+                        ? t(language, "Recorded", "Registrado")
                       : formatCurrency(dailyGoal.status === "met" ? dailyGoal.aboveUsd : dailyGoal.remainingUsd)}
                   </Text>
                 </View>

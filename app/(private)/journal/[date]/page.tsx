@@ -12,6 +12,11 @@ import NotebookCaptureButton from "@/app/components/NotebookCaptureButton";
 
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries, getJournalEntryByDate, saveJournalDay } from "@/lib/journalSupabase";
+import {
+  applyJournalSessionStatusTags,
+  getJournalSessionStatus,
+  type JournalSessionStatus,
+} from "@/lib/journalSessionStatus";
 
 import { getJournalTradesForDay } from "@/lib/journalTradesSupabase";
 
@@ -1107,6 +1112,7 @@ export default function DailyJournalPage() {
   // Preserve extra keys that already exist in journal_entries.notes (e.g., broker sync metadata: costs/pnl/synced_at).
   // This prevents the UI 'Save' action from accidentally wiping sync metadata.
   const [notesExtra, setNotesExtra] = useState<Record<string, any>>({});
+  const [sessionStatus, setSessionStatus] = useState<JournalSessionStatus>("traded");
   const [strategyPlan, setStrategyPlan] = useState<GrowthPlan | null>(null);
   const [strategyPlanError, setStrategyPlanError] = useState<string | null>(null);
   const [neuroLayer, setNeuroLayer] = useState<NeuroLayer>(DEFAULT_NEURO_LAYER);
@@ -1493,6 +1499,7 @@ export default function DailyJournalPage() {
 
         if (existing) {
           setEntry((prev) => ({ ...prev, ...existing, date: dateParam }));
+          setSessionStatus(getJournalSessionStatus(existing));
 
           const existingPnlNum =
             typeof (existing as any).pnl === "number"
@@ -1681,6 +1688,7 @@ export default function DailyJournalPage() {
           setInsideInk(null);
           setAfterInk(null);
           setNotesExtra({});
+          setSessionStatus("traded");
           setMindset(DEFAULT_MINDSET);
           setAfterReview(DEFAULT_AFTER_REVIEW);
           setAfterDidWellMode("text");
@@ -1792,6 +1800,11 @@ export default function DailyJournalPage() {
 
     // User manually changed trades → switch PnL to auto mode (computed from Entries/Exits)
     setPnlMode("auto");
+    setSessionStatus("traded");
+    setEntry((prev) => ({
+      ...prev,
+      tags: applyJournalSessionStatusTags(prev.tags, "traded"),
+    }));
 
     let finalKind: InstrumentType = newEntryTrade.kind;
     if (finalKind === "option" && !looksLikeOptionContract(symbol)) finalKind = "stock";
@@ -2262,7 +2275,10 @@ export default function DailyJournalPage() {
      Save (Supabase)
   ========================================================= */
 
-  const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
+  const handleSave = async (opts?: {
+    silent?: boolean;
+    sessionStatusOverride?: JournalSessionStatus;
+  }): Promise<boolean> => {
     if (authLoading || accountsLoading) {
       if (!opts?.silent) {
         setMsg(L("Your account is still loading. Please wait a moment.", "Tu cuenta todavía está cargando. Espera un momento."));
@@ -2293,20 +2309,36 @@ export default function DailyJournalPage() {
       return false;
     }
 
+    const commissions = toNum((notesExtra as any)?.costs?.commissions);
+    const fees = toNum((notesExtra as any)?.costs?.fees);
+    const costsTotal = commissions + fees;
+    const effectiveSessionStatus = opts?.sessionStatusOverride ?? sessionStatus;
+    const hasRecordedTradingActivity =
+      entryTrades.length > 0 ||
+      exitTrades.length > 0 ||
+      Math.abs(Number(pnlFromDb ?? 0)) > 0.005 ||
+      Math.abs(costsTotal) > 0.005;
+
+    if (effectiveSessionStatus === "not_traded" && hasRecordedTradingActivity) {
+      setMsg(
+        L(
+          "This day has trades, P&L, commissions, or fees and cannot be marked Not Traded.",
+          "Este día tiene trades, P&L, comisiones o fees y no se puede marcar como No operado."
+        )
+      );
+      return false;
+    }
+
     setSaving(true);
     setAutoSaveState("saving");
     if (!opts?.silent) {
       setMsg("");
     }
 
-    const commissions = toNum((notesExtra as any)?.costs?.commissions);
-    const fees = toNum((notesExtra as any)?.costs?.fees);
-    const costsTotal = commissions + fees;
-
     const grossAuto = Number.isFinite(pnlCalc.total) ? pnlCalc.total : 0;
     const netAuto = grossAuto - costsTotal;
 
-    const pnlToSave = (() => {
+    const pnlToSave = effectiveSessionStatus === "not_traded" ? 0 : (() => {
       if (pnlMode === "db" && pnlFromDb != null && Number.isFinite(pnlFromDb)) {
         if (costsTotal > 0) {
           const eps = 0.01;
@@ -2320,6 +2352,7 @@ export default function DailyJournalPage() {
 
     // Preserve any extra keys that may already exist in notes (e.g., broker sync metadata)
     const nextExtra: Record<string, any> = { ...(notesExtra || {}) };
+    nextExtra.session_status = effectiveSessionStatus;
 
     // Keep a pnl snapshot in notes (if desired / present)
     try {
@@ -2334,7 +2367,7 @@ export default function DailyJournalPage() {
     }
 
     // Mindset + checklist snapshot for AI Coach and future analytics
-    const tags = Array.isArray(entry.tags) ? entry.tags : [];
+    const tags = applyJournalSessionStatusTags(entry.tags, effectiveSessionStatus);
     const checklistSnapshot = {
       premarket: extractPrefixed(tags, TAG_PREFIX.premarket),
       inside: extractPrefixed(tags, TAG_PREFIX.inside),
@@ -2383,6 +2416,7 @@ export default function DailyJournalPage() {
       date: dateParam,
       notes: notesPayload,
       pnl: Number(pnlToSave.toFixed(2)),
+      tags,
     };
 
     try {
@@ -2397,6 +2431,8 @@ export default function DailyJournalPage() {
       // Avoid re-marking the form as dirty from our own save-side state updates.
       autoSaveIgnoreNextRef.current = true;
       setNotesExtra(nextExtra);
+      setSessionStatus(effectiveSessionStatus);
+      setEntry((previous) => ({ ...previous, tags, sessionStatus: effectiveSessionStatus }));
       setPnlFromDb(Number(pnlToSave.toFixed(2)));
       setPnlMode("db");
       setAutoSaveDirty(false);
@@ -2405,8 +2441,9 @@ export default function DailyJournalPage() {
 
       if (!opts?.silent) {
         setMsg(
-          L("Saved ✅ · Neuro Insight: ", "Guardado ✅ · Neuro Insight: ") +
-            neuroInsight
+          effectiveSessionStatus === "not_traded"
+            ? L("Saved as Not Traded ✅", "Guardado como No operado ✅")
+            : L("Saved ✅ · Neuro Insight: ", "Guardado ✅ · Neuro Insight: ") + neuroInsight
         );
         setTimeout(() => setMsg(""), 2000);
       }
@@ -2432,6 +2469,12 @@ export default function DailyJournalPage() {
     const ok = await handleSave();
     if (!ok) return;
     router.push("/dashboard");
+  };
+
+  const handleToggleNotTraded = async () => {
+    const nextStatus: JournalSessionStatus =
+      sessionStatus === "not_traded" ? "traded" : "not_traded";
+    await handleSave({ sessionStatusOverride: nextStatus });
   };
 
   /* =========================================================
@@ -4382,7 +4425,11 @@ export default function DailyJournalPage() {
               sourceId={dateParam}
               pageType="lesson"
               title={L(`Session lesson · ${dateParam}`, `Lección de sesión · ${dateParam}`)}
-              content={`${L("<h2>Recorded outcome</h2>", "<h2>Resultado registrado</h2>")}<p>${L("P/L", "P/L")}: ${Number(entry.pnl || 0).toFixed(2)} · ${L("Plan respected", "Plan respetado")}: ${entry.respectedPlan ? L("Yes", "Sí") : L("No", "No")}</p>${L("<h2>Premarket evidence</h2>", "<h2>Evidencia premarket</h2>")}${premarketHtml || "<p></p>"}${L("<h2>Live evidence</h2>", "<h2>Evidencia durante sesión</h2>")}${insideHtml || "<p></p>"}${L("<h2>Post-session evidence</h2>", "<h2>Evidencia post-sesión</h2>")}${afterHtml || "<p></p>"}`}
+              content={`${L("<h2>Recorded outcome</h2>", "<h2>Resultado registrado</h2>")}${
+                sessionStatus === "not_traded"
+                  ? `<p>${L("Status: Not Traded", "Estado: No operado")}</p>`
+                  : `<p>${L("P/L", "P/L")}: ${Number(entry.pnl || 0).toFixed(2)} · ${L("Plan respected", "Plan respetado")}: ${entry.respectedPlan ? L("Yes", "Sí") : L("No", "No")}</p>`
+              }${L("<h2>Premarket evidence</h2>", "<h2>Evidencia premarket</h2>")}${premarketHtml || "<p></p>"}${L("<h2>Live evidence</h2>", "<h2>Evidencia durante sesión</h2>")}${insideHtml || "<p></p>"}${L("<h2>Post-session evidence</h2>", "<h2>Evidencia post-sesión</h2>")}${afterHtml || "<p></p>"}`}
             />
             <div className="mr-0 sm:mr-2">
               <span
@@ -4488,6 +4535,24 @@ export default function DailyJournalPage() {
               <div className="flex items-center flex-wrap justify-start xl:justify-end gap-1.5" data-tour="journal-save">
               <button
                 type="button"
+                onClick={() => void handleToggleNotTraded()}
+                disabled={saving || syncing}
+                title={L(
+                  "Record that no trades were taken on this date.",
+                  "Registra que no se tomaron trades en esta fecha."
+                )}
+                className={`px-3 py-1.5 rounded-lg border text-[11px] font-semibold transition disabled:opacity-50 ${
+                  sessionStatus === "not_traded"
+                    ? "border-amber-300/60 bg-amber-400/15 text-amber-100 hover:bg-amber-400/20"
+                    : "border-slate-700 text-slate-200 hover:border-amber-400 hover:text-amber-200"
+                }`}
+              >
+                {sessionStatus === "not_traded"
+                  ? L("Not Traded ✓ · Undo", "No operado ✓ · Deshacer")
+                  : L("Mark Not Traded", "Marcar No operado")}
+              </button>
+              <button
+                type="button"
                 onClick={handleGoToImport}
                 className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-[11px] hover:border-sky-400 hover:text-sky-300 transition"
               >
@@ -4547,6 +4612,17 @@ export default function DailyJournalPage() {
             </div>
           ) : null}
 
+          {sessionStatus === "not_traded" ? (
+            <div className="mt-2 rounded-xl border border-amber-300/35 bg-amber-400/10 px-3 py-2.5 text-xs text-amber-100">
+              <span className="font-semibold">{L("Not Traded", "No operado")}</span>
+              {" · "}
+              {L(
+                "This date is documented as an intentional day without trading and will not count as a $0 trading session.",
+                "Esta fecha consta como un día intencional sin operar y no contará como una sesión de trading de $0."
+              )}
+            </div>
+          ) : null}
+
           {accountsError && !activeAccountId ? (
             <div className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2.5 text-xs text-amber-100">
               <span>
@@ -4574,7 +4650,11 @@ export default function DailyJournalPage() {
                     {L("Auto P&L", "P&L Auto")}
                   </p>
                   <div className="mt-1 text-[16px] font-semibold text-emerald-100 leading-none">
-                    {pnlInput?.trim() ? pnlInput : "—"}
+                    {sessionStatus === "not_traded"
+                      ? L("Not Traded", "No operado")
+                      : pnlInput?.trim()
+                        ? pnlInput
+                        : "—"}
                   </div>
                 </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">

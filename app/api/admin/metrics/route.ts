@@ -35,7 +35,7 @@ function buildDailySeries<T extends Record<string, any>>(
 
 export async function GET(req: NextRequest) {
   try {
-    const admin = await requireAdminUser(req, { action: "metrics:read", limit: 60, windowMs: 60_000 });
+    const admin = await requireAdminUser(req, { action: "metrics:read", permission: "metrics.read", limit: 60, windowMs: 60_000 });
     if (!admin.ok) return admin.response;
 
     const since7 = toISO(7);

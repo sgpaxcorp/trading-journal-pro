@@ -10,6 +10,12 @@ import {
   runDeterministicScreen,
   type ScreeningStrategy,
 } from "@/lib/neuroScreeningEngine";
+import {
+  calculateCurrentRatio,
+  calculateInterestCoverage,
+  calculateRoicProxy,
+  type DerivedScreeningMetric,
+} from "@/lib/neuroScreeningMetrics";
 import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 
 export const runtime = "nodejs";
@@ -74,6 +80,15 @@ const SECTOR_UNIVERSES: Record<SectorKey, { label: string; tickers: string[] }> 
   },
 };
 
+const LIVE_SCREENING_STRATEGIES = [
+  "quality_compounder",
+  "value_candidate",
+  "quality_at_reasonable_price",
+  "balance_sheet_strength",
+] as const satisfies ReadonlyArray<Exclude<ScreeningStrategy, "custom">>;
+
+type LiveScreeningStrategy = (typeof LIVE_SCREENING_STRATEGIES)[number];
+
 function cleanSector(value: string | null): SectorKey {
   const key = String(value ?? "technology").trim().toLowerCase().replace(/[^a-z_]/g, "_") as SectorKey;
   return SECTOR_UNIVERSES[key] ? key : "technology";
@@ -105,10 +120,13 @@ function growthFromRows(rows: NeuroMarketData["annualFundamentals"], key: "total
   const clean = [...(rows ?? [])]
     .filter((row) => numberOrNull(row[key]) != null)
     .sort((a, b) => Number(a.year) - Number(b.year));
-  if (clean.length < 2) return null;
+  if (clean.length < 2) return { value: null, firstValue: null, lastValue: null, years: null };
   const first = clean[0];
   const last = clean[clean.length - 1];
-  return cagr(numberOrNull(first[key]), numberOrNull(last[key]), Math.max(1, Number(last.year) - Number(first.year)));
+  const firstValue = numberOrNull(first[key]);
+  const lastValue = numberOrNull(last[key]);
+  const years = Math.max(1, Number(last.year) - Number(first.year));
+  return { value: cagr(firstValue, lastValue, years), firstValue, lastValue, years };
 }
 
 function median(values: Array<number | null | undefined>) {
@@ -118,7 +136,63 @@ function median(values: Array<number | null | undefined>) {
   return clean.length % 2 ? clean[mid] : (clean[mid - 1] + clean[mid]) / 2;
 }
 
+function derivedMetricDiagnostic(metric: DerivedScreeningMetric, source: string, period: string, calculatedAt: string) {
+  return {
+    classification: "CALCULATION" as const,
+    source,
+    reportingPeriod: period,
+    formula: metric.formula,
+    inputs: metric.inputs,
+    calculationTimestamp: calculatedAt,
+    unavailableReason: metric.value == null
+      ? `Cannot calculate because the following verified inputs are unavailable or invalid: ${metric.missingInputs.join(", ") || "required financial inputs"}.`
+      : null,
+  };
+}
+
+function calculatedDiagnostic(input: {
+  value: number | null;
+  source: string;
+  period: string;
+  formula: string;
+  inputs: Array<{ name: string; value: number | null }>;
+  calculatedAt: string;
+}) {
+  const missingInputs = input.inputs.filter((item) => item.value == null).map((item) => item.name);
+  return {
+    classification: "CALCULATION" as const,
+    source: input.source,
+    reportingPeriod: input.period,
+    formula: input.formula,
+    inputs: input.inputs,
+    calculationTimestamp: input.calculatedAt,
+    unavailableReason: input.value == null
+      ? `Cannot calculate because the following verified inputs are unavailable or invalid: ${missingInputs.join(", ") || "required financial inputs"}.`
+      : null,
+  };
+}
+
+function factDiagnostic(input: {
+  value: number | null;
+  source: string;
+  period: string;
+  label: string;
+}) {
+  return {
+    classification: "FACT" as const,
+    source: input.source,
+    reportingPeriod: input.period,
+    formula: null,
+    inputs: [],
+    calculationTimestamp: null,
+    unavailableReason: input.value == null
+      ? `${input.label} was not returned by the configured market-data sources for this reporting period.`
+      : null,
+  };
+}
+
 function analyzeCompany(item: NeuroMarketData) {
+  const calculatedAt = new Date().toISOString();
   const latest = latestFundamentals(item);
   const annual = [...(item.annualFundamentals ?? [])].sort((a, b) => Number(a.year) - Number(b.year));
   const previous = annual.at(-2) ?? null;
@@ -127,8 +201,10 @@ function analyzeCompany(item: NeuroMarketData) {
   const netIncome = numberOrNull(latest?.netIncome);
   const fcfYield = marketCap && freeCashFlow != null ? freeCashFlow / marketCap : null;
   const earningsYield = marketCap && netIncome != null ? netIncome / marketCap : null;
-  const revenueCagr = growthFromRows(item.annualFundamentals, "totalRevenue");
-  const fcfCagr = growthFromRows(item.annualFundamentals, "freeCashFlow");
+  const revenueCagrAnalysis = growthFromRows(item.annualFundamentals, "totalRevenue");
+  const fcfCagrAnalysis = growthFromRows(item.annualFundamentals, "freeCashFlow");
+  const revenueCagr = revenueCagrAnalysis.value;
+  const fcfCagr = fcfCagrAnalysis.value;
   const latestRevenue = numberOrNull(latest?.totalRevenue);
   const previousRevenue = numberOrNull(previous?.totalRevenue);
   const revenueGrowth = latestRevenue != null && previousRevenue != null && previousRevenue !== 0
@@ -139,6 +215,113 @@ function analyzeCompany(item: NeuroMarketData) {
   const shareDilution = currentShares != null && previousShares != null && previousShares !== 0
     ? (currentShares - previousShares) / Math.abs(previousShares)
     : null;
+  const returnOnInvestedCapital = calculateRoicProxy(latest);
+  const currentRatio = calculateCurrentRatio(latest);
+  const interestCoverage = calculateInterestCoverage(latest);
+  const source = latest?.sourceName ?? item.dataQuality?.fundamentalsSource ?? item.source ?? "Market Data";
+  const marketCapSource = item.dataQuality?.marketCapSource ?? item.source;
+  const reportingPeriod = latest?.reportingPeriod ?? latest?.asOfDate ?? (latest?.year ? `FY ${latest.year}` : "DATA NOT AVAILABLE");
+  const marketPeriod = item.dataQuality?.fetchedAt ?? calculatedAt;
+
+  const metricDiagnostics = {
+    market_capitalization: factDiagnostic({ value: marketCap, source: marketCapSource, period: marketPeriod, label: "Market capitalization" }),
+    free_cash_flow: factDiagnostic({ value: freeCashFlow, source, period: reportingPeriod, label: "Free cash flow" }),
+    fcf_yield: calculatedDiagnostic({
+      value: fcfYield,
+      source: `${source}; ${marketCapSource}`,
+      period: reportingPeriod,
+      formula: "freeCashFlow / marketCapitalization",
+      inputs: [{ name: "free cash flow", value: freeCashFlow }, { name: "market capitalization", value: marketCap }],
+      calculatedAt,
+    }),
+    earnings_yield: calculatedDiagnostic({
+      value: earningsYield,
+      source: `${source}; ${marketCapSource}`,
+      period: reportingPeriod,
+      formula: "netIncome / marketCapitalization",
+      inputs: [{ name: "net income", value: netIncome }, { name: "market capitalization", value: marketCap }],
+      calculatedAt,
+    }),
+    revenue_growth: calculatedDiagnostic({
+      value: revenueGrowth,
+      source,
+      period: reportingPeriod,
+      formula: "(latestRevenue - previousRevenue) / abs(previousRevenue)",
+      inputs: [{ name: "latest revenue", value: latestRevenue }, { name: "previous revenue", value: previousRevenue }],
+      calculatedAt,
+    }),
+    revenue_cagr: calculatedDiagnostic({
+      value: revenueCagr,
+      source,
+      period: reportingPeriod,
+      formula: "(latestRevenue / earliestRevenue) ^ (1 / years) - 1",
+      inputs: [
+        { name: "earliest positive revenue", value: revenueCagrAnalysis.firstValue },
+        { name: "latest positive revenue", value: revenueCagrAnalysis.lastValue },
+        { name: "elapsed fiscal years", value: revenueCagrAnalysis.years },
+      ],
+      calculatedAt,
+    }),
+    fcf_growth: calculatedDiagnostic({
+      value: fcfCagr,
+      source,
+      period: reportingPeriod,
+      formula: "(latestFreeCashFlow / earliestFreeCashFlow) ^ (1 / years) - 1",
+      inputs: [
+        { name: "earliest positive free cash flow", value: fcfCagrAnalysis.firstValue },
+        { name: "latest positive free cash flow", value: fcfCagrAnalysis.lastValue },
+        { name: "elapsed fiscal years", value: fcfCagrAnalysis.years },
+      ],
+      calculatedAt,
+    }),
+    operating_margin: calculatedDiagnostic({
+      value: numberOrNull(latest?.operatingMargin),
+      source,
+      period: reportingPeriod,
+      formula: "operatingIncome / totalRevenue",
+      inputs: [
+        { name: "operating income", value: numberOrNull(latest?.operatingIncome) },
+        { name: "total revenue", value: numberOrNull(latest?.totalRevenue) },
+      ],
+      calculatedAt,
+    }),
+    fcf_margin: calculatedDiagnostic({
+      value: numberOrNull(latest?.fcfMargin),
+      source,
+      period: reportingPeriod,
+      formula: "freeCashFlow / totalRevenue",
+      inputs: [
+        { name: "free cash flow", value: freeCashFlow },
+        { name: "total revenue", value: numberOrNull(latest?.totalRevenue) },
+      ],
+      calculatedAt,
+    }),
+    debt_to_equity: calculatedDiagnostic({
+      value: numberOrNull(latest?.debtToEquity),
+      source,
+      period: reportingPeriod,
+      formula: "totalDebt / stockholdersEquity",
+      inputs: [
+        { name: "total debt", value: numberOrNull(latest?.totalDebt) },
+        { name: "stockholders' equity", value: numberOrNull(latest?.stockholdersEquity) },
+      ],
+      calculatedAt,
+    }),
+    share_dilution: calculatedDiagnostic({
+      value: shareDilution,
+      source,
+      period: reportingPeriod,
+      formula: "(latestDilutedShares - previousDilutedShares) / abs(previousDilutedShares)",
+      inputs: [{ name: "latest diluted shares", value: currentShares }, { name: "previous diluted shares", value: previousShares }],
+      calculatedAt,
+    }),
+    trailing_pe: factDiagnostic({ value: numberOrNull(item.market.trailingPE), source: item.source, period: marketPeriod, label: "Trailing P/E" }),
+    forward_pe: factDiagnostic({ value: numberOrNull(item.market.forwardPE), source: item.source, period: marketPeriod, label: "Forward P/E" }),
+    price_to_book: factDiagnostic({ value: numberOrNull(item.market.priceToBook), source: item.source, period: marketPeriod, label: "Price to book" }),
+    return_on_invested_capital: derivedMetricDiagnostic(returnOnInvestedCapital, source, reportingPeriod, calculatedAt),
+    current_ratio: derivedMetricDiagnostic(currentRatio, source, reportingPeriod, calculatedAt),
+    interest_coverage: derivedMetricDiagnostic(interestCoverage, source, reportingPeriod, calculatedAt),
+  };
 
   return {
     ticker: item.ticker,
@@ -158,18 +341,26 @@ function analyzeCompany(item: NeuroMarketData) {
     operatingMargin: numberOrNull(latest?.operatingMargin),
     fcfMargin: numberOrNull(latest?.fcfMargin),
     debtToEquity: numberOrNull(latest?.debtToEquity),
+    returnOnInvestedCapital: returnOnInvestedCapital.value,
+    currentRatio: currentRatio.value,
+    interestCoverage: interestCoverage.value,
     freeCashFlow,
     revenueGrowth,
     shareDilution,
+    latestFiscalPeriod: reportingPeriod,
+    fundamentalsSource: source,
+    dataDegraded: Boolean(item.dataQuality?.degraded),
+    dataQualityMessages: item.dataQuality?.messages ?? [],
+    metricDiagnostics,
     dataWarnings: Object.entries(item.errors ?? {})
       .filter(([, error]) => Boolean(error))
       .map(([key]) => key),
   };
 }
 
-function cleanStrategy(value: string | null): Exclude<ScreeningStrategy, "custom"> {
-  const strategy = String(value ?? "value_candidate") as Exclude<ScreeningStrategy, "custom">;
-  return strategy in DEFAULT_SCREENING_TEMPLATES ? strategy : "value_candidate";
+function cleanStrategy(value: string | null): LiveScreeningStrategy {
+  const strategy = String(value ?? "value_candidate") as LiveScreeningStrategy;
+  return LIVE_SCREENING_STRATEGIES.includes(strategy) ? strategy : "value_candidate";
 }
 
 export async function GET(req: Request) {
@@ -242,6 +433,9 @@ export async function GET(req: Request) {
           fcf_margin: row.fcfMargin,
           debt_to_equity: row.debtToEquity,
           share_dilution: row.shareDilution,
+          return_on_invested_capital: row.returnOnInvestedCapital,
+          current_ratio: row.currentRatio,
+          interest_coverage: row.interestCoverage,
           trailing_pe: row.trailingPE,
           forward_pe: row.forwardPE,
           price_to_book: row.priceToBook,
@@ -249,7 +443,17 @@ export async function GET(req: Request) {
       })),
     });
     const analyzedByTicker = new Map(analyzed.map((row) => [row.ticker, row]));
-    const rows = screening.results.map((result) => ({ ...analyzedByTicker.get(result.ticker)!, ...result }));
+    const rows = screening.results.map((result) => {
+      const company = analyzedByTicker.get(result.ticker)!;
+      return {
+        ...company,
+        ...result,
+        criteria: result.criteria.map((criterion) => ({
+          ...criterion,
+          diagnostic: company.metricDiagnostics[criterion.metricKey as keyof typeof company.metricDiagnostics] ?? null,
+        })),
+      };
+    });
     const summary = {
       market: "US",
       sector,
@@ -264,6 +468,11 @@ export async function GET(req: Request) {
       passedAllRequiredCriteria: rows.filter((row) => row.status === "PASSED_ALL_REQUIRED_CRITERIA").length,
       failedRequiredCriteria: rows.filter((row) => row.status === "FAILED_REQUIRED_CRITERIA").length,
       insufficientData: rows.filter((row) => row.status === "INSUFFICIENT_DATA").length,
+      fullCoverage: rows.filter((row) => row.dataCompletenessPct === 100).length,
+      averageDataCompletenessPct: rows.length
+        ? Math.round((rows.reduce((sum, row) => sum + row.dataCompletenessPct, 0) / rows.length) * 100) / 100
+        : 0,
+      degradedSources: rows.filter((row) => row.dataDegraded).length,
     };
 
     await recordNeuroUsage({
@@ -281,7 +490,10 @@ export async function GET(req: Request) {
       noLlmUsed: true,
       strategy,
       template: screening.template,
-      templates: Object.values(DEFAULT_SCREENING_TEMPLATES).map((template) => ({ key: template.key, name: template.name })),
+      templates: LIVE_SCREENING_STRATEGIES.map((key) => ({
+        key,
+        name: DEFAULT_SCREENING_TEMPLATES[key].name,
+      })),
       market: "US",
       sector,
       sectorLabel: universe.label,

@@ -46,6 +46,57 @@ type CoachMessage = {
   role: "user" | "coach" | "system";
   content: string;
   created_at: string;
+  meta?: CoachMessageMeta | null;
+};
+
+type CoachEvidence = {
+  id: string;
+  label: string;
+  value: string;
+  date?: string | null;
+  detail?: string | null;
+  strength: "verified" | "reported" | "inference";
+};
+
+type CoachActionPlan = {
+  summary?: string;
+  verdict?: "on_plan" | "at_risk" | "off_plan" | "insufficient_data" | "action_required";
+  businessImpact?: string;
+  whatISee?: string;
+  whatIsDrifting?: string;
+  whatToProtect?: string;
+  whatChangesNextSession?: string;
+  nextAction?: string;
+  checkpointFocus?: string;
+};
+
+type CoachSuggestedCommitment = {
+  title: string;
+  instruction: string;
+  successCriteria: string;
+  metric: string;
+  targetSessions: number;
+  thresholdUsd?: number | null;
+};
+
+type CoachMessageMeta = {
+  actionPlan?: CoachActionPlan | null;
+  autoAudit?: Record<string, unknown> | null;
+  evidence?: CoachEvidence[] | null;
+  confidence?: "high" | "medium" | "low" | null;
+  suggestedCommitment?: CoachSuggestedCommitment | null;
+};
+
+type CoachCommitment = {
+  id: string;
+  title: string;
+  instruction: string;
+  successCriteria: string;
+  targetSessions: number;
+  sessionsEvaluated: number;
+  sessionsMet: number;
+  status: string;
+  outcomes: Array<{ date: string; status: "met" | "missed" | "needs_evidence"; value: string }>;
 };
 
 type JournalEntryRow = {
@@ -69,6 +120,7 @@ type JournalListResponse = {
 };
 
 type AccountSeriesResponse = {
+  accountId?: string;
   plan?: {
     startingBalance?: number;
     targetBalance?: number;
@@ -145,6 +197,12 @@ type AnalyticsSnapshot = {
 
 type AnalyticsSnapshotResponse = {
   snapshot: AnalyticsSnapshot | null;
+};
+
+type CoachMemory = {
+  daily?: string;
+  weekly?: string;
+  global?: string;
 };
 
 type CoachSnapshot = {
@@ -451,6 +509,10 @@ export function AICoachScreen({}: AICoachScreenProps) {
   const [journalEntries, setJournalEntries] = useState<JournalEntryRow[]>([]);
   const [accountSeries, setAccountSeries] = useState<AccountSeriesResponse | null>(null);
   const [analyticsSnapshot, setAnalyticsSnapshot] = useState<AnalyticsSnapshot | null>(null);
+  const [coachMemory, setCoachMemory] = useState<CoachMemory | null>(null);
+  const [activeCommitment, setActiveCommitment] = useState<CoachCommitment | null>(null);
+  const [commitmentBusy, setCommitmentBusy] = useState(false);
+  const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, number>>({});
   const listRef = useRef<FlatList<CoachMessage>>(null);
   const focusedOnceRef = useRef(false);
 
@@ -482,7 +544,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
     if (!supabaseMobile) return null;
     const { data, error } = await supabaseMobile
       .from("ai_coach_messages")
-      .select("id,thread_id,role,content,created_at")
+      .select("id,thread_id,role,content,meta,created_at")
       .eq("thread_id", threadId)
       .order("created_at", { ascending: true })
       .limit(200);
@@ -506,6 +568,8 @@ export function AICoachScreen({}: AICoachScreenProps) {
       setJournalEntries([]);
       setAccountSeries(null);
       setAnalyticsSnapshot(null);
+      setCoachMemory(null);
+      setActiveCommitment(null);
       return;
     }
 
@@ -520,6 +584,16 @@ export function AICoachScreen({}: AICoachScreenProps) {
       const [seriesRes, analyticsRes] = await Promise.all([
         apiGet<AccountSeriesResponse>(ACCOUNT_SERIES_CONTEXT_PATH),
         apiGet<AnalyticsSnapshotResponse>(`/api/analytics/snapshot?mobileRefresh=${Date.now()}`),
+      ]);
+
+      const accountId = String(seriesRes?.accountId ?? "");
+      const [memoryRes, commitmentRes] = await Promise.all([
+        apiGet<CoachMemory>("/api/ai-coach/memory").catch(() => null),
+        accountId
+          ? apiGet<{ active: CoachCommitment | null }>(
+              `/api/ai-coach/commitments?accountId=${encodeURIComponent(accountId)}&language=${language}`
+            ).catch(() => null)
+          : Promise.resolve(null),
       ]);
 
       const seriesStartIso = String(seriesRes?.plan?.seriesStartIso ?? "").slice(0, 10);
@@ -538,6 +612,8 @@ export function AICoachScreen({}: AICoachScreenProps) {
       setJournalEntries(entries);
       setAccountSeries(seriesRes ?? null);
       setAnalyticsSnapshot(analyticsRes?.snapshot ?? null);
+      setCoachMemory(memoryRes);
+      setActiveCommitment(commitmentRes?.active ?? null);
     } catch (err: any) {
       setScreenError(err?.message ?? t(language, "Could not load coach context.", "No se pudo cargar el contexto del coach."));
     } finally {
@@ -831,7 +907,16 @@ export function AICoachScreen({}: AICoachScreenProps) {
           .eq("id", thread.id);
       }
 
-      const res = await apiPost<{ text: string }>("/api/ai-coach", {
+      const res = await apiPost<{
+        text: string;
+        actionPlan?: CoachActionPlan | null;
+        autoAudit?: Record<string, unknown> | null;
+        evidence?: CoachEvidence[];
+        confidence?: "high" | "medium" | "low";
+        suggestedCommitment?: CoachSuggestedCommitment | null;
+        model?: string;
+        usage?: unknown;
+      }>("/api/ai-coach", {
         threadId: thread?.id ?? null,
         chatHistory: [...chatHistory, { role: "user", text }],
         question: text,
@@ -902,7 +987,6 @@ export function AICoachScreen({}: AICoachScreenProps) {
           askFollowupQuestion: true,
           shortSegments: true,
           strictEvidenceMode: Boolean(coachSnapshot || analyticsSnapshot || recentSessions.length),
-          fastResponse: true,
         },
         coachingFocus: {
           useAnalyticsSummary: true,
@@ -912,6 +996,13 @@ export function AICoachScreen({}: AICoachScreenProps) {
       }, { timeoutMs: 75_000 });
 
       const coachText = res?.text || t(language, "No response from coach.", "Sin respuesta del coach.");
+      const coachMeta: CoachMessageMeta = {
+        actionPlan: res?.actionPlan ?? null,
+        autoAudit: res?.autoAudit ?? null,
+        evidence: Array.isArray(res?.evidence) ? res.evidence : [],
+        confidence: res?.confidence ?? null,
+        suggestedCommitment: res?.suggestedCommitment ?? null,
+      };
       let coachMessage: CoachMessage | null = null;
 
       if (thread?.id) {
@@ -922,8 +1013,13 @@ export function AICoachScreen({}: AICoachScreenProps) {
             user_id: userId,
             role: "coach",
             content: coachText,
+            meta: {
+              ...coachMeta,
+              model: res?.model ?? null,
+              usage: res?.usage ?? null,
+            },
           })
-          .select("id,thread_id,role,content,created_at")
+          .select("id,thread_id,role,content,meta,created_at")
           .single();
 
         if (coachRow) {
@@ -944,6 +1040,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
           role: "coach",
           content: coachText,
           created_at: new Date().toISOString(),
+          meta: coachMeta,
         },
       ]);
     } catch (err: any) {
@@ -973,6 +1070,58 @@ export function AICoachScreen({}: AICoachScreenProps) {
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
     }
   }
+
+  async function acceptCommitment(message: CoachMessage) {
+    const accountId = String(accountSeries?.accountId ?? "");
+    if (!accountId || !message.meta?.actionPlan || commitmentBusy) return;
+    try {
+      setCommitmentBusy(true);
+      setScreenError(null);
+      const evidence = message.meta.evidence ?? [];
+      const response = await apiPost<{ commitment: CoachCommitment }>("/api/ai-coach/commitments", {
+        accountId,
+        threadId: message.thread_id,
+        sourceMessageId: message.id.startsWith("coach-") ? null : message.id,
+        actionPlan: message.meta.actionPlan,
+        evidence,
+        suggestedCommitment: message.meta.suggestedCommitment ?? null,
+        baselineDate: evidence.find((item) => item.date)?.date ?? recentSessions[0]?.date ?? isoDate(new Date()),
+        language,
+      });
+      setActiveCommitment(response.commitment);
+    } catch (error: any) {
+      setScreenError(error?.message ?? t(language, "Could not accept commitment.", "No se pudo aceptar el compromiso."));
+    } finally {
+      setCommitmentBusy(false);
+    }
+  }
+
+  async function sendFeedback(message: CoachMessage, rating: 1 | -1) {
+    if (message.id.startsWith("coach-") || message.id.startsWith("error-")) return;
+    try {
+      await apiPost("/api/ai-coach/feedback", {
+        messageId: message.id,
+        threadId: message.thread_id,
+        rating,
+      });
+      setFeedbackByMessage((prev) => ({ ...prev, [message.id]: rating }));
+    } catch (error: any) {
+      setScreenError(error?.message ?? t(language, "Could not save feedback.", "No se pudo guardar el feedback."));
+    }
+  }
+
+  const latestCoachMessage = [...messages].reverse().find((message) => message.role === "coach" && message.meta?.actionPlan);
+  const verdict = latestCoachMessage?.meta?.actionPlan?.verdict ?? "insufficient_data";
+  const verdictLabel =
+    verdict === "on_plan"
+      ? t(language, "On plan", "En plan")
+      : verdict === "at_risk"
+        ? t(language, "At risk", "En riesgo")
+        : verdict === "off_plan"
+          ? t(language, "Off plan", "Fuera del plan")
+          : verdict === "action_required"
+            ? t(language, "Action required", "Acción requerida")
+            : t(language, "Evidence needed", "Falta evidencia");
 
   return (
     <ScreenScaffold
@@ -1025,6 +1174,78 @@ export function AICoachScreen({}: AICoachScreenProps) {
         </Text>
       ) : null}
 
+      {(latestCoachMessage?.meta?.actionPlan || activeCommitment) ? (
+        <View style={styles.executiveCard}>
+          <View style={styles.executiveHeader}>
+            <Text style={styles.executiveKicker}>{t(language, "Executive coach brief", "Brief ejecutivo del coach")}</Text>
+            <Text style={styles.verdictBadge}>{verdictLabel}</Text>
+          </View>
+          {latestCoachMessage?.meta?.actionPlan?.summary ? (
+            <Text style={styles.executiveTitle}>{latestCoachMessage.meta.actionPlan.summary}</Text>
+          ) : null}
+          {latestCoachMessage?.meta?.actionPlan?.businessImpact ? (
+            <Text style={styles.executiveImpact}>
+              {t(language, "Business impact", "Impacto empresarial")}: {latestCoachMessage.meta.actionPlan.businessImpact}
+            </Text>
+          ) : null}
+          {latestCoachMessage?.meta?.actionPlan?.nextAction ? (
+            <View style={styles.nextActionCard}>
+              <Text style={styles.nextActionLabel}>{t(language, "Next action", "Próxima acción")}</Text>
+              <Text style={styles.nextActionText}>{latestCoachMessage.meta.actionPlan.nextAction}</Text>
+            </View>
+          ) : null}
+          {activeCommitment ? (
+            <View style={styles.commitmentCard}>
+              <Text style={styles.commitmentTitle}>{activeCommitment.title}</Text>
+              <Text style={styles.commitmentText}>{activeCommitment.successCriteria}</Text>
+              <View style={styles.outcomeRow}>
+                {Array.from({ length: activeCommitment.targetSessions }, (_, index) => {
+                  const outcome = activeCommitment.outcomes[index];
+                  return (
+                    <View key={index} style={[styles.outcomeBox, outcome?.status === "met" && styles.outcomeMet, outcome?.status === "missed" && styles.outcomeMissed]}>
+                      <Text style={styles.outcomeLabel}>{index + 1}</Text>
+                      <Text style={styles.outcomeValue}>{outcome?.value ?? t(language, "Pending", "Pendiente")}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          ) : latestCoachMessage?.meta?.suggestedCommitment ? (
+            <Pressable
+              style={[styles.commitmentButton, commitmentBusy && styles.sendButtonDisabled]}
+              disabled={commitmentBusy}
+              onPress={() => acceptCommitment(latestCoachMessage)}
+            >
+              <Text style={styles.commitmentButtonText}>
+                {commitmentBusy
+                  ? t(language, "Accepting…", "Aceptando…")
+                  : t(language, "Commit for the next 3 sessions", "Comprometerme por las próximas 3 sesiones")}
+              </Text>
+            </Pressable>
+          ) : null}
+          {latestCoachMessage?.meta?.evidence?.length ? (
+            <View style={styles.evidenceList}>
+              <Text style={styles.evidenceHeading}>
+                {t(language, "Evidence used", "Evidencia utilizada")} · {latestCoachMessage.meta.confidence ?? "low"}
+              </Text>
+              {latestCoachMessage.meta.evidence.slice(0, 3).map((item) => (
+                <View key={item.id} style={styles.evidenceRow}>
+                  <Text style={styles.evidenceLabel}>{item.label}</Text>
+                  <Text style={styles.evidenceValue}>{item.value}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {coachMemory?.daily || coachMemory?.weekly ? (
+        <View style={styles.memoryCard}>
+          <Text style={styles.cardTitle}>{t(language, "Neuro Memory", "Neuro Memory")}</Text>
+          <Text style={styles.memoryText}>{clampText(coachMemory.daily || coachMemory.weekly, 360)}</Text>
+        </View>
+      ) : null}
+
       <View style={styles.chatCard}>
         <Text style={styles.cardTitle}>{t(language, "Conversation", "Conversación")}</Text>
         {loadingMessages ? (
@@ -1049,6 +1270,25 @@ export function AICoachScreen({}: AICoachScreenProps) {
                   </Text>
                   <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleCoach]}>
                     <Text style={styles.bubbleText}>{item.content}</Text>
+                    {!isUser && item.meta?.actionPlan ? (
+                      <View style={styles.messagePlanCard}>
+                        {item.meta.actionPlan.whatISee ? <Text style={styles.messagePlanText}>{item.meta.actionPlan.whatISee}</Text> : null}
+                        {item.meta.actionPlan.whatIsDrifting ? <Text style={styles.messagePlanText}>• {item.meta.actionPlan.whatIsDrifting}</Text> : null}
+                        {item.meta.actionPlan.whatToProtect ? <Text style={styles.messagePlanText}>• {item.meta.actionPlan.whatToProtect}</Text> : null}
+                        {item.meta.suggestedCommitment ? (
+                          <Pressable style={styles.inlineCommitmentButton} onPress={() => acceptCommitment(item)} disabled={commitmentBusy}>
+                            <Text style={styles.inlineCommitmentText}>{t(language, "Track next 3 sessions", "Medir próximas 3 sesiones")}</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    {!isUser ? (
+                      <View style={styles.feedbackRow}>
+                        <Text style={styles.feedbackLabel}>{t(language, "Helpful?", "¿Útil?")}</Text>
+                        <Pressable onPress={() => sendFeedback(item, 1)}><Text style={[styles.feedbackChoice, feedbackByMessage[item.id] === 1 && styles.feedbackChoiceActive]}>👍</Text></Pressable>
+                        <Pressable onPress={() => sendFeedback(item, -1)}><Text style={[styles.feedbackChoice, feedbackByMessage[item.id] === -1 && styles.feedbackChoiceActive]}>👎</Text></Pressable>
+                      </View>
+                    ) : null}
                     <Text style={[styles.bubbleMeta, isUser ? styles.bubbleMetaUser : styles.bubbleMetaCoach]}>
                       {item.created_at.slice(11, 16)}
                     </Text>
@@ -1124,6 +1364,13 @@ export function AICoachScreen({}: AICoachScreenProps) {
             )}
           </Pressable>
         </View>
+        <Text style={styles.safetyText}>
+          {t(
+            language,
+            "Process coaching only — no buy/sell signals, security selection, or order placement.",
+            "Coaching de proceso únicamente — sin señales de compra/venta, selección de valores ni colocación de órdenes."
+          )}
+        </Text>
       </KeyboardAvoidingView>
       {Platform.OS === "ios" ? (
         <InputAccessoryView nativeID={COACH_INPUT_ACCESSORY_ID} backgroundColor={colors.surface}>
@@ -1197,6 +1444,116 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.textMuted,
       fontSize: 10,
     },
+    executiveCard: {
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.card,
+      padding: 14,
+      gap: 10,
+    },
+    executiveHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    executiveKicker: {
+      color: colors.primary,
+      fontSize: 10,
+      fontWeight: "800",
+      textTransform: "uppercase",
+      letterSpacing: 1.2,
+    },
+    verdictBadge: {
+      color: colors.primary,
+      fontSize: 10,
+      fontWeight: "800",
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: 999,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+    },
+    executiveTitle: {
+      color: colors.textPrimary,
+      fontSize: 17,
+      lineHeight: 22,
+      fontWeight: "800",
+    },
+    executiveImpact: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    nextActionCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 10,
+      gap: 4,
+    },
+    nextActionLabel: {
+      color: colors.primary,
+      fontSize: 9,
+      fontWeight: "800",
+      textTransform: "uppercase",
+      letterSpacing: 1,
+    },
+    nextActionText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: "700",
+    },
+    commitmentCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.successSoft,
+      padding: 10,
+      gap: 6,
+    },
+    commitmentTitle: { color: colors.textPrimary, fontSize: 12, fontWeight: "800" },
+    commitmentText: { color: colors.textMuted, fontSize: 11, lineHeight: 16 },
+    outcomeRow: { flexDirection: "row", gap: 6 },
+    outcomeBox: {
+      flex: 1,
+      minHeight: 48,
+      borderRadius: 9,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 5,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    outcomeMet: { borderColor: colors.success, backgroundColor: colors.successSoft },
+    outcomeMissed: { borderColor: colors.danger },
+    outcomeLabel: { color: colors.textMuted, fontSize: 9, fontWeight: "800" },
+    outcomeValue: { color: colors.textPrimary, fontSize: 9, textAlign: "center" },
+    commitmentButton: {
+      borderRadius: 11,
+      backgroundColor: colors.primary,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      alignItems: "center",
+    },
+    commitmentButtonText: { color: colors.onPrimary, fontSize: 11, fontWeight: "800" },
+    evidenceList: { gap: 6 },
+    evidenceHeading: { color: colors.textMuted, fontSize: 9, fontWeight: "800", textTransform: "uppercase" },
+    evidenceRow: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 6 },
+    evidenceLabel: { color: colors.textMuted, fontSize: 9, textTransform: "uppercase" },
+    evidenceValue: { color: colors.textPrimary, fontSize: 11, lineHeight: 15 },
+    memoryCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 12,
+      gap: 6,
+    },
+    memoryText: { color: colors.textMuted, fontSize: 11, lineHeight: 16 },
     chatCard: {
       borderRadius: 12,
       borderWidth: 1,
@@ -1265,6 +1622,28 @@ const createStyles = (colors: ThemeColors) =>
       fontSize: 12,
       lineHeight: 18,
     },
+    messagePlanCard: {
+      marginTop: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      paddingTop: 8,
+      gap: 4,
+    },
+    messagePlanText: { color: colors.textPrimary, fontSize: 11, lineHeight: 16 },
+    inlineCommitmentButton: {
+      marginTop: 4,
+      borderRadius: 9,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+      alignItems: "center",
+    },
+    inlineCommitmentText: { color: colors.primary, fontSize: 10, fontWeight: "800" },
+    feedbackRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 },
+    feedbackLabel: { color: colors.textMuted, fontSize: 9 },
+    feedbackChoice: { fontSize: 14, opacity: 0.55 },
+    feedbackChoiceActive: { opacity: 1 },
     bubbleMeta: {
       marginTop: 4,
       color: colors.textMuted,
@@ -1313,6 +1692,12 @@ const createStyles = (colors: ThemeColors) =>
       flexDirection: "row",
       alignItems: "flex-end",
       gap: 8,
+    },
+    safetyText: {
+      marginTop: 6,
+      color: colors.textMuted,
+      fontSize: 9,
+      lineHeight: 13,
     },
     keyboardAccessory: {
       minHeight: 44,

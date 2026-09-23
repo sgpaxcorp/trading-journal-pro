@@ -15,6 +15,14 @@ import type { NormalizedOrderEvent } from "@/lib/brokers/types";
 import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
 import { after } from "next/server";
 import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
+import {
+  buildCoachEvidence,
+  buildSuggestedCommitment,
+  coachConfidenceFromEvidence,
+  normalizeCoachVerdict,
+  type CoachActionPlan,
+} from "@/lib/aiCoachAccountability";
+import { aiCoachSafetyPolicy } from "@/lib/aiCoachPolicy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,18 +69,6 @@ type CoachMemoryBundle = {
   global: string;
   weekly: string;
   daily: string;
-};
-
-type CoachActionPlan = {
-  summary: string;
-  whatISee: string;
-  whatIsDrifting: string;
-  whatToProtect: string;
-  whatChangesNextSession: string;
-  nextAction: string;
-  ruleToAdd: string;
-  ruleToRemove: string;
-  checkpointFocus: string;
 };
 
 type AutoAuditContext = {
@@ -1770,6 +1766,7 @@ function buildSystemPrompt(params: {
       "- Si usas headings, usa headings cortos y consistentes con el lente actual.",
       objectiveGuide,
       lensGuide,
+      aiCoachSafetyPolicy("es"),
       "No cierres con una pregunta de seguimiento por defecto. Hazla solo si falta información crítica o si una sola pregunta mejorará materialmente la próxima sesión.",
       "Entrega en Markdown simple (títulos cortos opcionales, bullets ok).",
     ].join("\n");
@@ -1810,6 +1807,7 @@ function buildSystemPrompt(params: {
     "- If you use headings, keep them short and consistent with the active lens.",
     objectiveGuide,
     lensGuide,
+    aiCoachSafetyPolicy("en"),
     "Do not end with a follow-up question by default. Ask one only if critical information is missing or one question would materially improve the next session plan.",
     "Output in clean Markdown (short headings optional, bullets ok).",
   ].join("\n");
@@ -2068,13 +2066,15 @@ async function buildCoachActionPlan(params: {
       ? [
           "Extrae un plan de acción operativo desde una respuesta de coaching de trading, anclado al Plan de Empresa de Trading del usuario.",
           "Devuelve SOLO JSON válido con este shape exacto:",
-          '{"summary":"", "whatISee":"", "whatIsDrifting":"", "whatToProtect":"", "whatChangesNextSession":"", "nextAction":"", "ruleToAdd":"", "ruleToRemove":"", "checkpointFocus":""}',
+          '{"summary":"", "verdict":"on_plan|at_risk|off_plan|insufficient_data|action_required", "businessImpact":"", "whatISee":"", "whatIsDrifting":"", "whatToProtect":"", "whatChangesNextSession":"", "nextAction":"", "ruleToAdd":"", "ruleToRemove":"", "checkpointFocus":""}',
           "Reglas:",
           "- Usa SOLO dos fuentes: 1) el bloque Trading Business Plan context, 2) la respuesta del coach.",
           "- NO inventes reglas, porcentajes, tamaños, instrumentos, setups, checkpoints ni límites.",
           "- Usa el plan del usuario como base factual, pero puedes reformular en lenguaje más claro, más útil y más humano si sigues siendo fiel al significado.",
           "- Debe sentirse como un coach real: observador, honesto, concreto y sin vender certezas.",
           "- summary: 1 frase corta de la tesis del coach conectada al plan del usuario, sin exagerar certeza.",
+          "- verdict: selecciona exactamente un valor permitido según la evidencia.",
+          "- businessImpact: explica en una frase cómo el patrón afecta capital, riesgo, consistencia o tiempo hacia la meta; si no hay soporte, usa string vacío.",
           "- whatISee: lo que ves en la ejecución o patrón del usuario según su plan y el contexto; breve, específico y humano.",
           "- whatIsDrifting: dónde se está desviando del plan o qué está perdiendo calidad; si no está claro, string vacío.",
           "- whatToProtect: lo que sí debe proteger en riesgo, proceso o conducta para no romper su edge.",
@@ -2088,13 +2088,15 @@ async function buildCoachActionPlan(params: {
       : [
           "Extract an operational action plan from a trading coaching response, anchored to the user's Trading Business Plan.",
           "Return ONLY valid JSON with this exact shape:",
-          '{"summary":"", "whatISee":"", "whatIsDrifting":"", "whatToProtect":"", "whatChangesNextSession":"", "nextAction":"", "ruleToAdd":"", "ruleToRemove":"", "checkpointFocus":""}',
+          '{"summary":"", "verdict":"on_plan|at_risk|off_plan|insufficient_data|action_required", "businessImpact":"", "whatISee":"", "whatIsDrifting":"", "whatToProtect":"", "whatChangesNextSession":"", "nextAction":"", "ruleToAdd":"", "ruleToRemove":"", "checkpointFocus":""}',
           "Rules:",
           "- Use ONLY two sources: 1) the Trading Business Plan context block, 2) the coach response.",
           "- Do NOT invent rules, percentages, sizes, instruments, setups, checkpoints, or limits.",
           "- Use the user's plan as factual base, but you may rephrase it into clearer, more useful, more human language if you stay faithful to the meaning.",
           "- It should feel like a real coach: observant, honest, concrete, and free of false certainty.",
           "- summary: 1 short sentence with the coach's thesis tied to the user's plan, without overstating certainty.",
+          "- verdict: choose exactly one allowed value based on the evidence.",
+          "- businessImpact: explain in one sentence how the pattern affects capital, risk, consistency, or time to target; if unsupported, return an empty string.",
           "- whatISee: what you see in the user's execution or pattern based on their plan and the context; brief, specific, and human.",
           "- whatIsDrifting: where the user is slipping away from plan quality; if unclear, return an empty string.",
           "- whatToProtect: what must stay intact in risk, process, or behavior so the edge is not damaged.",
@@ -2146,6 +2148,8 @@ async function buildCoachActionPlan(params: {
 
   return {
     summary: clampText(parsed.summary, 180),
+    verdict: normalizeCoachVerdict(parsed.verdict),
+    businessImpact: clampText(parsed.businessImpact, 220),
     whatISee,
     whatIsDrifting,
     whatToProtect,
@@ -2237,6 +2241,16 @@ export async function POST(req: Request) {
     const existingMemory = userId ? await getCoachMemory(userId, scopeKeys) : { global: "", weekly: "", daily: "" };
 
     const autoAudit = userId ? await buildAutomaticAuditContext(userId, body) : { block: "", meta: { attached: false } as AutoAuditContext };
+    const evidence = buildCoachEvidence({
+      language,
+      recentSessions: safeArray(body.recentSessions),
+      planSnapshot: body.planSnapshot ?? null,
+      growthPlan: body.growthPlan ?? null,
+      analyticsSnapshot: body.analyticsSnapshot ?? null,
+      cashflowsSummary: body.cashflowsSummary ?? null,
+      autoAudit: autoAudit.meta,
+    });
+    const confidence = coachConfidenceFromEvidence(evidence);
 
     let contextText = buildContextText(body, language);
     if (autoAudit.block) {
@@ -2370,6 +2384,7 @@ export async function POST(req: Request) {
     // Keep the model output intact; only backfill if the model returned nothing.
     coachText = maybeAppendFollowUp(coachText, language, question);
 
+    let suggestedCommitment: ReturnType<typeof buildSuggestedCommitment> | null = null;
     const buildAndPersistActionPlan = async (): Promise<CoachActionPlan | null> => {
       let computedActionPlan: CoachActionPlan | null = null;
       try {
@@ -2386,6 +2401,25 @@ export async function POST(req: Request) {
         });
       } catch {
         computedActionPlan = null;
+      }
+
+      if (computedActionPlan) {
+        const currentBalance = Number(
+          body?.planSnapshot?.currentBalance ?? body?.growthPlan?.startingBalance
+        );
+        const maxDailyLossPercent = Number(body?.growthPlan?.maxDailyLossPercent);
+        const maxDailyLossUsd =
+          Number.isFinite(currentBalance) &&
+          currentBalance > 0 &&
+          Number.isFinite(maxDailyLossPercent) &&
+          maxDailyLossPercent > 0
+            ? (currentBalance * maxDailyLossPercent) / 100
+            : null;
+        suggestedCommitment = buildSuggestedCommitment({
+          actionPlan: computedActionPlan,
+          language,
+          maxDailyLossUsd,
+        });
       }
 
       if (userId && body.threadId && computedActionPlan) {
@@ -2405,6 +2439,9 @@ export async function POST(req: Request) {
                 ...((existingThread as any)?.metadata ?? {}),
                 latestActionPlan: computedActionPlan,
                 latestAudit: autoAudit.meta,
+                latestEvidence: evidence,
+                latestConfidence: confidence,
+                latestSuggestedCommitment: suggestedCommitment,
                 updatedFrom: "ai-coach",
               },
               updated_at: new Date().toISOString(),
@@ -2503,6 +2540,9 @@ export async function POST(req: Request) {
       usage: result.usage,
       actionPlan,
       autoAudit: autoAudit.meta,
+      evidence,
+      confidence,
+      suggestedCommitment,
     });
   } catch (err: any) {
     const msg = safeString(err?.message) || "Unknown error";

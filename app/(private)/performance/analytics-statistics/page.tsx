@@ -34,6 +34,7 @@ import { resolveLocale } from "@/lib/i18n";
 import { type InstrumentType } from "@/lib/journalNotes";
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
+import { isNotTradedJournalEntry } from "@/lib/journalSessionStatus";
 import { listDailySnapshots, type DailySnapshotRow } from "@/lib/snapshotSupabase";
 import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashflowsSupabase";
 import { buildCashflowAdjustedDailyReturns } from "@/lib/performanceReturns";
@@ -1624,7 +1625,7 @@ export default function AnalyticsStatisticsPage() {
           if (alt?.length) all = alt;
         }
         if (!alive) return;
-        setEntries((all ?? []) as any);
+        setEntries((all ?? []).filter((entry) => !isNotTradedJournalEntry(entry)) as any);
       } catch (err) {
         console.error("[AnalyticsStatistics] getAllJournalEntries error:", err);
         if (!alive) return;

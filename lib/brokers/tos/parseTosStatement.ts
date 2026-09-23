@@ -36,10 +36,17 @@ export type TosStatementSummary = {
   dates: string[];
   fills: number;
   closedTrades: number;
+  openPositions: number;
+  realizedGrossPnl: number;
+  openPnlDay: number | null;
   grossPnl: number;
   commissions: number;
   fees: number;
   netPnl: number;
+  startingBalance: number | null;
+  endingCashBalance: number | null;
+  endingNetLiquidatingValue: number | null;
+  accountNetChange: number | null;
   reportedGrossPnl: number | null;
   reconciled: boolean | null;
 };
@@ -265,7 +272,22 @@ function reportedGrossPnl(rows: TosStatementRow[]): number | null {
   return null;
 }
 
-function calculateRealizedGross(fills: TosStatementFill[]): { gross: number; closedTrades: number } {
+function accountSummaryNumber(rows: TosStatementRow[], label: string): number | null {
+  const headerIndex = rows.findIndex((row) => headerCell(row[0]) === "ACCOUNT SUMMARY");
+  if (headerIndex < 0) return null;
+  const expected = headerCell(label);
+  for (let index = headerIndex + 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (headerCell(row[0]) !== expected) continue;
+    const raw = cell(row[1]);
+    return raw ? parseNumber(raw) : null;
+  }
+  return null;
+}
+
+function calculateRealizedGross(
+  fills: TosStatementFill[]
+): { gross: number; closedTrades: number; openPositions: number } {
   const positions = new Map<string, Array<{ qty: number; price: number }>>();
   let gross = 0;
   let closedTrades = 0;
@@ -292,7 +314,8 @@ function calculateRealizedGross(fills: TosStatementFill[]): { gross: number; clo
     positions.set(fill.contractCode, lots);
   }
 
-  return { gross: Number(gross.toFixed(2)), closedTrades };
+  const openPositions = Array.from(positions.values()).filter((lots) => lots.length > 0).length;
+  return { gross: Number(gross.toFixed(2)), closedTrades, openPositions };
 }
 
 export function parseTosStatementRows(rows: TosStatementRow[]): TosStatementParseResult {
@@ -301,10 +324,17 @@ export function parseTosStatementRows(rows: TosStatementRow[]): TosStatementPars
     dates: [],
     fills: 0,
     closedTrades: 0,
+    openPositions: 0,
+    realizedGrossPnl: 0,
+    openPnlDay: null,
     grossPnl: 0,
     commissions: 0,
     fees: 0,
     netPnl: 0,
+    startingBalance: null,
+    endingCashBalance: null,
+    endingNetLiquidatingValue: accountSummaryNumber(rows, "Net Liquidating Value"),
+    accountNetChange: null,
     reportedGrossPnl: reportedGrossPnl(rows),
     reconciled: null,
   };
@@ -349,15 +379,39 @@ export function parseTosStatementRows(rows: TosStatementRow[]): TosStatementPars
   const unparsedTradeRows = transactions.filter((row) => row.type === "TRD").length - fills.length;
   if (unparsedTradeRows > 0) warnings.push(`${unparsedTradeRows} trade row(s) could not be normalized.`);
 
-  const { gross, closedTrades } = calculateRealizedGross(fills);
+  const { gross: realizedGrossPnl, closedTrades, openPositions } = calculateRealizedGross(fills);
   const commissions = Number(fills.reduce((sum, fill) => sum + fill.commissions, 0).toFixed(2));
   const fees = Number(fills.reduce((sum, fill) => sum + fill.miscFees, 0).toFixed(2));
-  const netPnl = Number((gross - commissions - fees).toFixed(2));
   const dates = Array.from(new Set(fills.map((fill) => isoDate(fill.date)).filter((date): date is string => !!date))).sort();
   const reported = reportedGrossPnl(rows);
-  const reconciled = reported == null ? null : Math.abs(reported - gross) <= 0.01;
+  // Thinkorswim's P/L Day total represents the mark-to-market P&L of positions
+  // still open in the statement. Closed fills must be added separately.
+  const openPnlDay = openPositions > 0 ? reported : null;
+  const grossPnl = Number((realizedGrossPnl + (openPnlDay ?? 0)).toFixed(2));
+  const netPnl = Number((grossPnl - commissions - fees).toFixed(2));
+  const startingBalance = transactions.find((row) => row.type === "BAL")?.balance ?? null;
+  const endingCashBalance = [...transactions]
+    .reverse()
+    .find((row) => row.balance != null)?.balance ?? null;
+  const endingNetLiquidatingValue = accountSummaryNumber(rows, "Net Liquidating Value");
+  const accountNetChange =
+    startingBalance != null && endingNetLiquidatingValue != null
+      ? Number((endingNetLiquidatingValue - startingBalance).toFixed(2))
+      : null;
+  const reconciled =
+    openPositions > 0
+      ? accountNetChange == null
+        ? null
+        : Math.abs(accountNetChange - netPnl) <= 0.02
+      : reported == null
+        ? null
+        : Math.abs(reported - realizedGrossPnl) <= 0.01;
   if (reconciled === false) {
-    warnings.push(`Calculated gross P&L ${gross.toFixed(2)} does not match reported P/L Day ${reported?.toFixed(2)}.`);
+    warnings.push(
+      openPositions > 0 && accountNetChange != null
+        ? `Calculated net P&L ${netPnl.toFixed(2)} does not match the account change ${accountNetChange.toFixed(2)}.`
+        : `Calculated gross P&L ${realizedGrossPnl.toFixed(2)} does not match reported P/L Day ${reported?.toFixed(2)}.`
+    );
   }
 
   return {
@@ -368,10 +422,17 @@ export function parseTosStatementRows(rows: TosStatementRow[]): TosStatementPars
       dates,
       fills: fills.length,
       closedTrades,
-      grossPnl: gross,
+      openPositions,
+      realizedGrossPnl,
+      openPnlDay,
+      grossPnl,
       commissions,
       fees,
       netPnl,
+      startingBalance,
+      endingCashBalance,
+      endingNetLiquidatingValue,
+      accountNetChange,
       reportedGrossPnl: reported,
       reconciled,
     },

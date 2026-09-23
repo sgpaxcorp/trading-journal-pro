@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
+import { applyJournalSessionStatusTags } from "@/lib/journalSessionStatus";
 
 export const runtime = "nodejs";
 
@@ -54,12 +55,33 @@ function calcDTE(tradeDate: string, expiry: string | null): number | null {
   return Number.isFinite(diff) ? diff : null;
 }
 
-async function resolveStatementEndingBalance(params: {
+type StatementSummary = {
+  dates?: string[];
+  openPositions?: number;
+  openPnlDay?: number | null;
+  grossPnl?: number | null;
+  netPnl?: number | null;
+  endingCashBalance?: number | null;
+  endingNetLiquidatingValue?: number | null;
+  reconciled?: boolean | null;
+};
+
+type StatementSnapshot = {
+  endingBalance: number | null;
+  summary: StatementSummary | null;
+};
+
+function finiteNumberOrNull(value: unknown): number | null {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+async function resolveStatementSnapshot(params: {
   userId: string;
   trades: any[];
   startISO: string;
   endISO: string;
-}): Promise<number | null> {
+}): Promise<StatementSnapshot> {
   const importBatchIds = Array.from(
     new Set(
       params.trades
@@ -67,11 +89,11 @@ async function resolveStatementEndingBalance(params: {
         .filter(Boolean)
     )
   );
-  if (!importBatchIds.length) return null;
+  if (!importBatchIds.length) return { endingBalance: null, summary: null };
 
   const { data, error } = await supabaseAdmin
     .from("broker_transactions")
-    .select("balance,executed_at")
+    .select("balance,executed_at,raw")
     .eq("user_id", params.userId)
     .in("import_batch_id", importBatchIds)
     .not("balance", "is", null)
@@ -80,9 +102,17 @@ async function resolveStatementEndingBalance(params: {
     .order("executed_at", { ascending: false })
     .limit(1);
 
-  if (error || !data?.length) return null;
-  const balance = Number((data[0] as any)?.balance);
-  return Number.isFinite(balance) ? Number(balance.toFixed(2)) : null;
+  if (error || !data?.length) return { endingBalance: null, summary: null };
+  const row = data[0] as any;
+  const balance = finiteNumberOrNull(row?.balance);
+  const rawSummary = row?.raw?.statementSummary;
+  const summary = rawSummary && typeof rawSummary === "object"
+    ? (rawSummary as StatementSummary)
+    : null;
+  return {
+    endingBalance: balance == null ? null : Number(balance.toFixed(2)),
+    summary,
+  };
 }
 
 /* ---------------- multipliers ---------------- */
@@ -150,6 +180,8 @@ type UiTradeRow = {
   time: string;
   dte?: number | null;
   expiry?: string | null;
+  closureReason?: "expiration";
+  inferredFromStatement?: boolean;
   playbookStrategyAssignment?: unknown;
 };
 
@@ -359,18 +391,19 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const statementEndingBalance = await resolveStatementEndingBalance({
+    const statementSnapshot = await resolveStatementSnapshot({
       userId,
       trades: trades as any[],
       startISO,
       endISO,
     });
+    const statementEndingBalance = statementSnapshot.endingBalance;
 
     /* ---------- preserve textual notes ---------- */
     const existingNotesQuery = applyAccountFilter(
       supabaseAdmin
       .from("journal_entries")
-      .select("notes")
+      .select("notes,tags")
       .eq("user_id", userId)
       .eq("date", date)
     );
@@ -402,6 +435,7 @@ export async function POST(req: NextRequest) {
     // position + lots per contract key
     const posByKey = new Map<string, number>(); // signed qty (+long, -short)
     const lotsByKey = new Map<string, Lot[]>(); // FIFO lots for pnl
+    const optionMetaByKey = new Map<string, { symbol: string; expiry: string | null }>();
 
     let pnlGross = 0;
     let totalCommissions = 0;
@@ -432,6 +466,7 @@ export async function POST(req: NextRequest) {
       totalFees += safeCost(t.fees);
 
       const key = instrumentType === "option" ? symbol : symbol; // keep explicit for future changes
+      if (instrumentType === "option") optionMetaByKey.set(key, { symbol, expiry });
 
       const prevPos = posByKey.get(key) ?? 0;
       const delta = action === "BUY" ? qtyAbs : -qtyAbs;
@@ -539,10 +574,73 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const statementSummary = statementSnapshot.summary;
+    const statementOpenPositions = Number(statementSummary?.openPositions ?? 0);
+    const endingCash = finiteNumberOrNull(statementSummary?.endingCashBalance);
+    const endingNetLiquidatingValue = finiteNumberOrNull(
+      statementSummary?.endingNetLiquidatingValue
+    );
+    const residualPositionValue =
+      endingCash != null && endingNetLiquidatingValue != null
+        ? Number((endingNetLiquidatingValue - endingCash).toFixed(2))
+        : null;
+    const expiredOptionKeys = Array.from(posByKey.entries()).filter(([key, position]) => {
+      const meta = optionMetaByKey.get(key);
+      return Math.abs(position) > 1e-9 && !!meta?.expiry && meta.expiry <= date;
+    });
+    const canInferExpiration =
+      statementOpenPositions > 0 &&
+      statementSummary?.reconciled === true &&
+      statementOpenPositions === expiredOptionKeys.length &&
+      residualPositionValue != null &&
+      (expiredOptionKeys.length === 1 || Math.abs(residualPositionValue) <= 0.05);
+
+    if (canInferExpiration) {
+      for (const [key, position] of expiredOptionKeys) {
+        const meta = optionMetaByKey.get(key)!;
+        const qty = Math.abs(position);
+        const sign: 1 | -1 = position > 0 ? 1 : -1;
+        const settlementPrice =
+          expiredOptionKeys.length === 1
+            ? Math.max(0, (residualPositionValue! * sign) / (qty * 100))
+            : 0;
+        const lots = lotsByKey.get(key) ?? [];
+        pnlGross += closeLotsFIFO(lots, qty, settlementPrice, 100, sign);
+        exits.push({
+          id: `statement-expiration:${date}:${key}`,
+          symbol: meta.symbol,
+          kind: "option",
+          side: sign > 0 ? "long" : "short",
+          premiumSide: sign > 0 ? "debit" : "credit",
+          optionStrategy: "single",
+          price: fmtPx(settlementPrice),
+          quantity: fmtQty(qty),
+          time: "16:00:00",
+          dte: calcDTE(date, meta.expiry),
+          expiry: meta.expiry,
+          closureReason: "expiration",
+          inferredFromStatement: true,
+        });
+        posByKey.set(key, 0);
+        lotsByKey.set(key, []);
+      }
+    }
+
     pnlGross = Number(pnlGross.toFixed(2));
     totalCommissions = Number(totalCommissions.toFixed(2));
     totalFees = Number(totalFees.toFixed(2));
-    const pnlNet = Number((pnlGross - totalCommissions - totalFees).toFixed(2));
+    let pnlNet = Number((pnlGross - totalCommissions - totalFees).toFixed(2));
+    const statementGrossPnl = finiteNumberOrNull(statementSummary?.grossPnl);
+    const statementNetPnl = finiteNumberOrNull(statementSummary?.netPnl);
+    const useStatementPnl =
+      statementOpenPositions > 0 &&
+      statementSummary?.reconciled === true &&
+      statementGrossPnl != null &&
+      statementNetPnl != null;
+    if (useStatementPnl) {
+      pnlGross = Number(statementGrossPnl.toFixed(2));
+      pnlNet = Number(statementNetPnl.toFixed(2));
+    }
 
     /* ---------- prepare journal_trades ---------- */
     const jtRows = [
@@ -589,6 +687,7 @@ export async function POST(req: NextRequest) {
     );
     const notes = JSON.stringify({
       ...existingNotesPayload,
+      session_status: "traded",
       premarket,
       live,
       post,
@@ -601,7 +700,18 @@ export async function POST(req: NextRequest) {
       pnl: {
         gross: pnlGross,
         net: pnlNet,
+        source: useStatementPnl ? "broker_statement_reconciled" : "fills_fifo",
       },
+      ...(statementSummary
+        ? {
+            broker_reconciliation: {
+              openPositions: statementOpenPositions,
+              openPnlDay: finiteNumberOrNull(statementSummary.openPnlDay),
+              inferredExpirationExits: canInferExpiration ? expiredOptionKeys.length : 0,
+              reconciled: statementSummary.reconciled ?? null,
+            },
+          }
+        : {}),
       ...(statementEndingBalance != null
         ? {
             account_balance: {
@@ -632,6 +742,7 @@ export async function POST(req: NextRequest) {
           exit_price: exits[0]?.price ? safeNum(exits[0].price) : null,
           size: entries[0]?.quantity ? safeNum(entries[0].quantity) : null,
           notes,
+          tags: applyJournalSessionStatusTags((existing as any)?.tags, "traded"),
           respected_plan: true,
         },
       p_trades: jtRows,
@@ -653,6 +764,8 @@ export async function POST(req: NextRequest) {
       commissions: totalCommissions,
       fees: totalFees,
       ending_balance: statementEndingBalance,
+      pnl_source: useStatementPnl ? "broker_statement_reconciled" : "fills_fifo",
+      inferred_expiration_exits: canInferExpiration ? expiredOptionKeys.length : 0,
       entries,
       exits,
       message: "Journal synced successfully (fills-level + futures multipliers).",

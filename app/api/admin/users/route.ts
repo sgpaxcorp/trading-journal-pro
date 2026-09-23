@@ -125,7 +125,7 @@ type Body = {
 
 export async function POST(req: NextRequest) {
   try {
-    const admin = await requireAdminUser(req, { action: "users:write", limit: 20, windowMs: 10 * 60_000 });
+    const admin = await requireAdminUser(req, { action: "users:write", permission: "users.write", limit: 20, windowMs: 10 * 60_000 });
     if (!admin.ok) return admin.response;
 
     const body = (await req.json().catch(() => ({}))) as Body;
@@ -265,7 +265,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    const admin = await requireAdminUser(req, { action: "users:read", limit: 60, windowMs: 60_000 });
+    const admin = await requireAdminUser(req, { action: "users:read", permission: "users.read", limit: 60, windowMs: 60_000 });
     if (!admin.ok) return admin.response;
 
     const url = new URL(req.url);

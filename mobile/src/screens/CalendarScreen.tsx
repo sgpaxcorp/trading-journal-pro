@@ -168,6 +168,26 @@ type AccountSeriesResponse = {
   daily: { date: string; value: number }[];
 };
 
+type JournalCalendarEntry = {
+  date?: string | null;
+  notes?: string | null;
+  tags?: string[] | null;
+};
+
+type JournalListResponse = { entries?: JournalCalendarEntry[] };
+
+const NOT_TRADED_JOURNAL_TAG = "NTJ:NOT_TRADED";
+
+function isNotTradedEntry(entry: JournalCalendarEntry) {
+  if (entry?.tags?.includes(NOT_TRADED_JOURNAL_TAG)) return true;
+  try {
+    const parsed = entry?.notes ? JSON.parse(entry.notes) : null;
+    return parsed?.session_status === "not_traded";
+  } catch {
+    return false;
+  }
+}
+
 type CalendarScreenProps = {
   onOpenModule: OpenModuleFn;
   onOpenJournalDate: (date: string) => void;
@@ -178,6 +198,7 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [daily, setDaily] = useState<Array<{ date: string; value: number }>>([]);
+  const [notTradedDates, setNotTradedDates] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -220,9 +241,22 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
           setLoading(true);
         }
         setError(null);
-        const res = await apiGet<AccountSeriesResponse>(accountSeriesPath);
+        const [res, journal] = await Promise.all([
+          apiGet<AccountSeriesResponse>(accountSeriesPath),
+          apiGet<JournalListResponse>(
+            `/api/journal/list?fromDate=${monthRange.fromDate}&toDate=${monthRange.toDate}`
+          ),
+        ]);
         if (!active) return;
         setDaily(res.daily ?? []);
+        setNotTradedDates(
+          new Set(
+            (journal.entries ?? [])
+              .filter(isNotTradedEntry)
+              .map((entry) => String(entry?.date ?? "").slice(0, 10))
+              .filter(Boolean)
+          )
+        );
       } catch (err: any) {
         if (!active) return;
         setError(err?.message ?? "Failed to load calendar.");
@@ -239,14 +273,27 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
     return () => {
       active = false;
     };
-  }, [accountSeriesPath]);
+  }, [accountSeriesPath, monthRange.fromDate, monthRange.toDate]);
 
   async function handleRefresh() {
     setError(null);
     setRefreshing(true);
     try {
-      const res = await apiGet<AccountSeriesResponse>(accountSeriesPath);
+      const [res, journal] = await Promise.all([
+        apiGet<AccountSeriesResponse>(accountSeriesPath),
+        apiGet<JournalListResponse>(
+          `/api/journal/list?fromDate=${monthRange.fromDate}&toDate=${monthRange.toDate}`
+        ),
+      ]);
       setDaily(res.daily ?? []);
+      setNotTradedDates(
+        new Set(
+          (journal.entries ?? [])
+            .filter(isNotTradedEntry)
+            .map((entry) => String(entry?.date ?? "").slice(0, 10))
+            .filter(Boolean)
+        )
+      );
     } catch (err: any) {
       setError(err?.message ?? "Failed to refresh calendar.");
     } finally {
@@ -316,13 +363,18 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
             {days.map((cell, index) => {
               const pnl = cell.isoDate ? pnlMap.get(cell.isoDate) : null;
               const holiday = cell.isoDate ? holidayMap.get(cell.isoDate) : null;
+              const isNotTraded = cell.isoDate ? notTradedDates.has(cell.isoDate) : false;
               const isPositive = pnl != null && pnl > 0;
               const isNegative = pnl != null && pnl < 0;
               const isHoliday = !!holiday;
               const content = (
                 <>
                   <Text style={[styles.dayLabel, cell.isMuted && styles.mutedLabel]}>{cell.label}</Text>
-                  {isHoliday ? (
+                  {isNotTraded ? (
+                    <Text style={styles.notTradedLabel}>
+                      {language === "es" ? "No operó" : "Not Traded"}
+                    </Text>
+                  ) : isHoliday ? (
                     <>
                       <Text style={styles.holidayTag}>{language === "es" ? "Feriado" : "Holiday"}</Text>
                       <Text style={styles.holidayName} numberOfLines={1}>
@@ -345,6 +397,7 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
                       cell.isMuted && styles.mutedCell,
                       isPositive && styles.winCell,
                       isNegative && styles.lossCell,
+                      isNotTraded && styles.notTradedCell,
                       isHoliday && styles.holidayCell,
                     ]}
                   >
@@ -364,6 +417,7 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
                     cell.isMuted && styles.mutedCell,
                     isPositive && styles.winCell,
                     isNegative && styles.lossCell,
+                    isNotTraded && styles.notTradedCell,
                     isHoliday && styles.holidayCell,
                   ]}
                 >
@@ -484,6 +538,17 @@ const createStyles = (colors: ThemeColors) =>
     lossCell: {
       borderColor: colors.info,
       backgroundColor: colors.infoSoft,
+    },
+    notTradedCell: {
+      borderColor: colors.warning,
+      backgroundColor: colors.warningSoft,
+    },
+    notTradedLabel: {
+      color: colors.warning,
+      fontSize: 8,
+      lineHeight: 10,
+      textAlign: "center",
+      fontWeight: "800",
     },
     holidayCell: {
       borderColor: colors.warning,

@@ -17,6 +17,7 @@ import { resolveLocale } from "@/lib/i18n";
 
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries, getJournalEntryByDate } from "@/lib/journalSupabase";
+import { isNotTradedJournalEntry } from "@/lib/journalSessionStatus";
 import { getJournalTradesForDay } from "@/lib/journalTradesSupabase";
 import type { TradesPayload } from "@/lib/journalNotes";
 import { computeAllKPIs, type KPIResult } from "@/lib/kpiLibrary";
@@ -60,6 +61,13 @@ import {
   getNeuroInsightText,
   normalizeNeuroLayer,
 } from "@/lib/neuroLayer";
+import type {
+  CoachActionPlan,
+  CoachCommitment,
+  CoachConfidence,
+  CoachEvidenceItem,
+  CoachSuggestedCommitment,
+} from "@/lib/aiCoachAccountability";
 
 /* =========================
    Types
@@ -78,20 +86,13 @@ type ChatMessage = {
   meta?: {
     actionPlan?: CoachActionPlanMeta | null;
     autoAudit?: CoachAutoAuditMeta | null;
+    evidence?: CoachEvidenceItem[] | null;
+    confidence?: CoachConfidence | null;
+    suggestedCommitment?: CoachSuggestedCommitment | null;
   } | null;
 };
 
-type CoachActionPlanMeta = {
-  summary?: string;
-  whatISee?: string;
-  whatIsDrifting?: string;
-  whatToProtect?: string;
-  whatChangesNextSession?: string;
-  nextAction?: string;
-  ruleToAdd?: string;
-  ruleToRemove?: string;
-  checkpointFocus?: string;
-};
+type CoachActionPlanMeta = Partial<CoachActionPlan>;
 
 type CoachAutoAuditMeta = {
   attached?: boolean;
@@ -1839,6 +1840,10 @@ function AiCoachingPageInner() {
   const [feedbackEnabled, setFeedbackEnabled] = useState(true);
   const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, number>>({});
   const [feedbackSending, setFeedbackSending] = useState<Record<string, boolean>>({});
+  const [activeCommitment, setActiveCommitment] = useState<CoachCommitment | null>(null);
+  const [recentCommitments, setRecentCommitments] = useState<CoachCommitment[]>([]);
+  const [commitmentLoading, setCommitmentLoading] = useState(false);
+  const [commitmentError, setCommitmentError] = useState<string | null>(null);
 
   // UI state
   const [question, setQuestion] = useState("");
@@ -2114,6 +2119,79 @@ function AiCoachingPageInner() {
     );
   };
 
+  const renderEvidence = (
+    evidence?: CoachEvidenceItem[] | null,
+    confidence?: CoachConfidence | null
+  ) => {
+    if (!evidence?.length) return null;
+    const confidenceLabel =
+      confidence === "high"
+        ? L("High confidence", "Confianza alta")
+        : confidence === "medium"
+          ? L("Medium confidence", "Confianza media")
+          : L("Limited evidence", "Evidencia limitada");
+    return (
+      <details className="mt-3 rounded-xl border border-sky-400/20 bg-sky-500/5 p-3 text-[12px]">
+        <summary className="cursor-pointer list-none text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-200">
+          {L("Evidence used", "Evidencia utilizada")} · {confidenceLabel}
+        </summary>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {evidence.map((item) => (
+            <div key={item.id} className="rounded-lg border border-slate-700/80 bg-slate-950/50 p-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] uppercase tracking-[0.13em] text-slate-400">{item.label}</p>
+                <span className="rounded-full border border-sky-400/20 px-1.5 py-0.5 text-[9px] text-sky-200">
+                  {item.strength === "verified" ? L("Verified", "Verificado") : L("Inference", "Inferencia")}
+                </span>
+              </div>
+              <p className="mt-1 font-medium text-slate-100">{item.value}</p>
+              {(item.date || item.detail) && (
+                <p className="mt-1 text-[10px] text-slate-500">{[item.date, item.detail].filter(Boolean).join(" · ")}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </details>
+    );
+  };
+
+  const renderCommitment = (commitment: CoachCommitment) => (
+    <div className="rounded-2xl border border-amber-300/30 bg-gradient-to-br from-amber-400/10 via-slate-950/70 to-emerald-400/10 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-200">
+            {L("3-session accountability", "Accountability de 3 sesiones")}
+          </p>
+          <h3 className="mt-1 text-sm font-semibold text-white">{commitment.title}</h3>
+          <p className="mt-1 text-xs leading-relaxed text-slate-300">{commitment.instruction}</p>
+        </div>
+        <span className="shrink-0 rounded-full border border-amber-300/30 bg-amber-300/10 px-2.5 py-1 text-[10px] font-semibold text-amber-100">
+          {commitment.sessionsEvaluated}/{commitment.targetSessions}
+        </span>
+      </div>
+      <p className="mt-3 text-[11px] text-slate-400">{commitment.successCriteria}</p>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {Array.from({ length: commitment.targetSessions }, (_, index) => {
+          const outcome = commitment.outcomes[index];
+          const tone = !outcome
+            ? "border-slate-700 text-slate-500"
+            : outcome.status === "met"
+              ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
+              : outcome.status === "missed"
+                ? "border-rose-400/30 bg-rose-400/10 text-rose-100"
+                : "border-amber-400/30 bg-amber-400/10 text-amber-100";
+          return (
+            <div key={index} className={`rounded-xl border p-2 text-center ${tone}`}>
+              <p className="text-[9px] uppercase tracking-[0.12em]">{L("Session", "Sesión")} {index + 1}</p>
+              <p className="mt-1 text-[10px] font-semibold">{outcome?.value || L("Pending", "Pendiente")}</p>
+              {outcome?.date ? <p className="mt-0.5 text-[9px] opacity-70">{outcome.date}</p> : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   const renderGrowthPlanSuggestions = (plan?: CoachActionPlanMeta | null) => {
     const ruleToAdd = String(plan?.ruleToAdd || "").trim();
     const ruleToRemove = String(plan?.ruleToRemove || "").trim();
@@ -2267,6 +2345,65 @@ function AiCoachingPageInner() {
       return;
     }
     setCoachMemory(data);
+  };
+
+  const fetchCoachCommitments = async () => {
+    if (!activeAccountId) return;
+    const session = await supabaseBrowser.auth.getSession();
+    const token = session?.data?.session?.access_token;
+    if (!token) return;
+    const res = await fetch(
+      `/api/ai-coach/commitments?accountId=${encodeURIComponent(activeAccountId)}&language=${coachUiLang}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (data?.code !== "migration_required") {
+        setCommitmentError(data?.error || L("Could not load accountability.", "No se pudo cargar accountability."));
+      }
+      return;
+    }
+    setActiveCommitment(data?.active ?? null);
+    setRecentCommitments(Array.isArray(data?.recent) ? data.recent : []);
+    setCommitmentError(null);
+  };
+
+  const acceptCoachCommitment = async (message: ChatMessage) => {
+    if (!activeAccountId || !activeThread || !message.meta?.actionPlan) return;
+    try {
+      setCommitmentLoading(true);
+      setCommitmentError(null);
+      const session = await supabaseBrowser.auth.getSession();
+      const token = session?.data?.session?.access_token;
+      if (!token) throw new Error(L("Your session expired.", "Tu sesión expiró."));
+      const evidence = message.meta.evidence ?? [];
+      const baselineDate =
+        evidence.find((item) => item.date)?.date ||
+        recentSessions[0]?.date ||
+        isoDate(new Date());
+      const res = await fetch("/api/ai-coach/commitments", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: activeAccountId,
+          threadId: activeThread.id,
+          sourceMessageId: message.id,
+          actionPlan: message.meta.actionPlan,
+          evidence,
+          suggestedCommitment: message.meta.suggestedCommitment ?? null,
+          baselineDate,
+          language: coachUiLang,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || L("Could not accept commitment.", "No se pudo aceptar el compromiso."));
+      setActiveCommitment(data.commitment ?? null);
+      await fetchCoachCommitments();
+    } catch (error: any) {
+      setCommitmentError(error?.message || L("Could not accept commitment.", "No se pudo aceptar el compromiso."));
+    } finally {
+      setCommitmentLoading(false);
+    }
   };
 
   const loadFeedbackState = async (threadId: string) => {
@@ -2804,7 +2941,7 @@ function AiCoachingPageInner() {
         // 3) Journal
         const all = userId && activeAccountId ? await getAllJournalEntries(userId, activeAccountId) : [];
         if (!alive) return;
-        setEntries(all || []);
+        setEntries((all || []).filter((entry) => !isNotTradedJournalEntry(entry)));
 
         // 4) Growth plan (Supabase table: growth_plans)
         const { data: gp, error: gpErr } = await supabaseBrowser
@@ -2880,7 +3017,7 @@ function AiCoachingPageInner() {
 
         // 7) Coach memory snapshot
         if (!alive) return;
-        await fetchCoachMemory();
+        await Promise.all([fetchCoachMemory(), fetchCoachCommitments()]);
       } catch (err) {
         console.error("[AI Coaching] load error:", err);
         if (!alive) return;
@@ -3715,6 +3852,9 @@ function AiCoachingPageInner() {
       const coachMeta: ChatMessage["meta"] = {
         actionPlan: data?.actionPlan ?? null,
         autoAudit: data?.autoAudit ?? null,
+        evidence: Array.isArray(data?.evidence) ? data.evidence : [],
+        confidence: data?.confidence ?? null,
+        suggestedCommitment: data?.suggestedCommitment ?? null,
       };
 
       // 5) Persist coach message (Supabase)
@@ -3728,6 +3868,9 @@ function AiCoachingPageInner() {
           usage: data?.usage || null,
           actionPlan: coachMeta?.actionPlan ?? null,
           autoAudit: coachMeta?.autoAudit ?? null,
+          evidence: coachMeta?.evidence ?? [],
+          confidence: coachMeta?.confidence ?? null,
+          suggestedCommitment: coachMeta?.suggestedCommitment ?? null,
         },
       });
 
@@ -3759,7 +3902,18 @@ function AiCoachingPageInner() {
 
   const latestCoachArtifacts = [...messages]
     .reverse()
-    .find((msg) => msg.role === "coach" && (msg.meta?.actionPlan || msg.meta?.autoAudit));
+    .find((msg) => msg.role === "coach" && (msg.meta?.actionPlan || msg.meta?.autoAudit || msg.meta?.evidence?.length));
+  const latestVerdict = latestCoachArtifacts?.meta?.actionPlan?.verdict ?? "insufficient_data";
+  const verdictMeta =
+    latestVerdict === "on_plan"
+      ? { label: L("On plan", "En plan"), tone: "border-emerald-300/40 bg-emerald-300/10 text-emerald-100" }
+      : latestVerdict === "at_risk"
+        ? { label: L("At risk", "En riesgo"), tone: "border-amber-300/40 bg-amber-300/10 text-amber-100" }
+        : latestVerdict === "off_plan"
+          ? { label: L("Off plan", "Fuera del plan"), tone: "border-rose-300/40 bg-rose-300/10 text-rose-100" }
+          : latestVerdict === "action_required"
+            ? { label: L("Action required", "Acción requerida"), tone: "border-orange-300/40 bg-orange-300/10 text-orange-100" }
+            : { label: L("Evidence needed", "Falta evidencia"), tone: "border-sky-300/40 bg-sky-300/10 text-sky-100" };
 
   const selectedCoachModeMeta =
     coachMode === "weekly-review"
@@ -4033,6 +4187,77 @@ function AiCoachingPageInner() {
           </div>
         </section>
 
+        {(latestCoachArtifacts?.meta?.actionPlan || activeCommitment) && (
+          <section className="rounded-3xl border border-emerald-400/25 bg-[linear-gradient(135deg,rgba(16,185,129,0.14),rgba(2,6,23,0.96)_42%,rgba(14,165,233,0.10))] p-4 shadow-[0_24px_80px_rgba(2,6,23,0.45)] md:p-6">
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-emerald-300">
+                    {L("Executive coach brief", "Brief ejecutivo del coach")}
+                  </p>
+                  <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${verdictMeta.tone}`}>
+                    {verdictMeta.label}
+                  </span>
+                  {latestCoachArtifacts?.meta?.confidence ? (
+                    <span className="rounded-full border border-slate-700 px-2.5 py-1 text-[10px] text-slate-300">
+                      {L("Confidence", "Confianza")}: {latestCoachArtifacts.meta.confidence === "high" ? L("high", "alta") : latestCoachArtifacts.meta.confidence === "medium" ? L("medium", "media") : L("low", "baja")}
+                    </span>
+                  ) : null}
+                </div>
+                <h2 className="mt-3 max-w-3xl text-xl font-semibold leading-tight text-white md:text-2xl">
+                  {latestCoachArtifacts?.meta?.actionPlan?.summary || activeCommitment?.title}
+                </h2>
+                {latestCoachArtifacts?.meta?.actionPlan?.businessImpact ? (
+                  <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">
+                    <span className="font-semibold text-cyan-200">{L("Business impact", "Impacto empresarial")}:</span>{" "}
+                    {latestCoachArtifacts.meta.actionPlan.businessImpact}
+                  </p>
+                ) : null}
+                {latestCoachArtifacts?.meta?.actionPlan?.nextAction ? (
+                  <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-slate-950/55 p-4">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-300">
+                      {L("Highest-leverage next action", "Próxima acción de mayor impacto")}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-100">{latestCoachArtifacts.meta.actionPlan.nextAction}</p>
+                  </div>
+                ) : null}
+                {latestCoachArtifacts ? renderEvidence(latestCoachArtifacts.meta?.evidence, latestCoachArtifacts.meta?.confidence) : null}
+                {commitmentError ? <p className="mt-3 text-xs text-rose-200">{commitmentError}</p> : null}
+              </div>
+              <div>
+                {activeCommitment ? (
+                  renderCommitment(activeCommitment)
+                ) : latestCoachArtifacts?.meta?.suggestedCommitment && latestCoachArtifacts.meta.actionPlan ? (
+                  <div className="rounded-2xl border border-amber-300/30 bg-slate-950/60 p-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-200">
+                      {L("Turn insight into execution", "Convierte el insight en ejecución")}
+                    </p>
+                    <h3 className="mt-2 text-sm font-semibold text-white">{latestCoachArtifacts.meta.suggestedCommitment.title}</h3>
+                    <p className="mt-2 text-xs leading-relaxed text-slate-300">{latestCoachArtifacts.meta.suggestedCommitment.successCriteria}</p>
+                    <button
+                      type="button"
+                      disabled={commitmentLoading}
+                      onClick={() => acceptCoachCommitment(latestCoachArtifacts)}
+                      className="mt-4 w-full rounded-xl bg-amber-300 px-4 py-2.5 text-xs font-bold text-slate-950 transition hover:bg-amber-200 disabled:opacity-50"
+                    >
+                      {commitmentLoading ? L("Accepting...", "Aceptando...") : L("Accept 3-session commitment", "Aceptar compromiso de 3 sesiones")}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-slate-700 bg-slate-950/50 p-4 text-xs text-slate-400">
+                    {L("Ask the Coach for a plan review to create a measurable commitment.", "Pídele al Coach una revisión del plan para crear un compromiso medible.")}
+                  </div>
+                )}
+                {recentCommitments.length ? (
+                  <p className="mt-3 text-[10px] text-slate-500">
+                    {L("Completed accountability cycles", "Ciclos de accountability completados")}: {recentCommitments.length}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </section>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] gap-4 flex-1 min-h-0">
           {/* Chat panel */}
           <section className="rounded-2xl border border-slate-800 bg-slate-900/70 flex flex-col min-h-0">
@@ -4148,6 +4373,21 @@ function AiCoachingPageInner() {
                     {msg.role === "coach" ? <CoachMarkdown text={msg.text} /> : msg.text}
                     {msg.role === "coach" && renderActionPlan(msg.meta?.actionPlan)}
                     {msg.role === "coach" && renderAutoAudit(msg.meta?.autoAudit)}
+                    {msg.role === "coach" && renderEvidence(msg.meta?.evidence, msg.meta?.confidence)}
+                    {msg.role === "coach" && msg.meta?.actionPlan && msg.meta?.suggestedCommitment && (
+                      <button
+                        type="button"
+                        disabled={commitmentLoading}
+                        onClick={() => acceptCoachCommitment(msg)}
+                        className="mt-3 w-full rounded-xl border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-[11px] font-semibold text-amber-100 transition hover:bg-amber-300/20 disabled:opacity-50"
+                      >
+                        {commitmentLoading
+                          ? L("Accepting...", "Aceptando...")
+                          : activeCommitment
+                            ? L("Replace current 3-session commitment", "Reemplazar compromiso actual de 3 sesiones")
+                            : L("Commit to this for the next 3 sessions", "Comprometerme con esto por las próximas 3 sesiones")}
+                      </button>
+                    )}
                     {msg.role === "coach" && feedbackEnabled && (
                       <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-400">
                         <span>{L("Helpful?", "¿Útil?")}</span>
@@ -4319,9 +4559,15 @@ function AiCoachingPageInner() {
                         : "bg-emerald-500 hover:bg-emerald-400 text-slate-900"
                     }`}
                   >
-                    {coachState.loading ? L("Sending...", "Enviando...") : "Send"}
+                    {coachState.loading ? L("Sending...", "Enviando...") : L("Send", "Enviar")}
                   </button>
                 </div>
+                <p className="text-[10px] leading-relaxed text-slate-500">
+                  {L(
+                    "Process and accountability coaching only. It does not provide buy/sell signals, select securities, or place orders.",
+                    "Coaching de proceso y accountability únicamente. No provee señales de compra/venta, no selecciona valores ni coloca órdenes."
+                  )}
+                </p>
               </div>
             </div>
           </section>

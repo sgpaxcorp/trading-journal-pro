@@ -277,7 +277,7 @@ export async function GET(
   { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
-    const admin = await requireAdminUser(req, { action: "users:detail:read", limit: 120, windowMs: 60_000 });
+    const admin = await requireAdminUser(req, { action: "users:detail:read", permission: "users.read", limit: 120, windowMs: 60_000 });
     if (!admin.ok) return admin.response;
 
     const { userId } = await params;
@@ -297,12 +297,19 @@ export async function PATCH(
   { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
-    const admin = await requireAdminUser(req, { action: "users:detail:write", limit: 20, windowMs: 10 * 60_000 });
+    const admin = await requireAdminUser(req, { action: "users:detail:write", permission: "users.write", limit: 20, windowMs: 10 * 60_000 });
     if (!admin.ok) return admin.response;
 
     const { userId } = await params;
     const body = (await req.json().catch(() => ({}))) as { action?: string; accessKeys?: string[] };
     const action = String(body?.action ?? "").toLowerCase();
+
+    if (["ban", "unban", "reset"].includes(action) && !admin.access.permissions.includes("users.destructive")) {
+      return NextResponse.json(
+        { error: "Insufficient admin permission", permission: "users.destructive" },
+        { status: 403 }
+      );
+    }
 
     if (!userId) {
       return NextResponse.json({ error: "Missing user id." }, { status: 400 });
@@ -410,7 +417,7 @@ export async function DELETE(
   { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
-    const admin = await requireAdminUser(req, { action: "users:detail:delete", limit: 10, windowMs: 10 * 60_000 });
+    const admin = await requireAdminUser(req, { action: "users:detail:delete", permission: "users.destructive", limit: 10, windowMs: 10 * 60_000 });
     if (!admin.ok) return admin.response;
 
     const { userId } = await params;

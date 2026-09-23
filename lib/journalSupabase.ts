@@ -2,6 +2,7 @@
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import type { JournalEntry } from "@/lib/journalTypes";
 import type { StoredTradeRow, TradesPayload } from "@/lib/journalNotes";
+import { getJournalSessionStatus } from "@/lib/journalSessionStatus";
 
 const TABLE_NAME = "journal_entries" as const;
 const LOG_PREFIX = "[journalSupabase]";
@@ -131,6 +132,7 @@ function rowToJournalEntry(row: any): JournalEntry {
   return {
     date: toDateString(row.date),
     pnl: toNumberOrZero(row.pnl),
+    sessionStatus: getJournalSessionStatus(row),
     instrument: row.instrument ?? undefined,
     direction: (row.direction ?? undefined) as any,
 

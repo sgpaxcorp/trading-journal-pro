@@ -30,7 +30,7 @@ export const maxDuration = 300;
 
 export async function GET(req: NextRequest) {
   try {
-    const admin = await requireAdminUser(req, { action: "email-automations:read", limit: 60, windowMs: 60_000 });
+    const admin = await requireAdminUser(req, { action: "email-automations:read", permission: "communications.read", limit: 60, windowMs: 60_000 });
     if (!admin.ok) return admin.response;
 
     const [recipients, waitlistOverview] = await Promise.all([
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const admin = await requireAdminUser(req, { action: "email-automations:write", limit: 20, windowMs: 10 * 60_000 });
+    const admin = await requireAdminUser(req, { action: "email-automations:write", permission: "communications.write", limit: 20, windowMs: 10 * 60_000 });
     if (!admin.ok) return admin.response;
 
     const runtimeGate = await requireRuntimeControl("email_delivery");
