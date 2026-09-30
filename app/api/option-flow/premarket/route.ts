@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import { getOptionFlowBetaApiPayload, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
+import {
+  getOptionFlowBetaApiPayload,
+  hasOptionFlowBetaAccess,
+  resolveOptionFlowLang,
+} from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
-import { isSmartToolsOwner } from "@/lib/smartToolsAccess";
 import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 import { GPT_6_ASTRA_MODEL, openAiChatTuning } from "@/lib/openAiModelConfig";
 
@@ -33,7 +36,7 @@ export async function POST(req: NextRequest) {
     const requestLang = resolveOptionFlowLang(req.headers.get("accept-language"));
 
     if (!BYPASS_ENTITLEMENT) {
-      const hasEnt = await isSmartToolsOwner({ userId, email: authData.user.email ?? null });
+      const hasEnt = await hasOptionFlowBetaAccess(userId);
       if (!hasEnt) {
         return NextResponse.json(getOptionFlowBetaApiPayload(requestLang), { status: 403 });
       }

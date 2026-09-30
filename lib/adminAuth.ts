@@ -45,13 +45,35 @@ function safeEqual(left: string, right: string) {
   return timingSafeEqual(a, b);
 }
 
+function isMissingPermissionsColumn(error: unknown) {
+  const candidate = error as { code?: string; message?: string } | null;
+  return (
+    candidate?.code === "42703" &&
+    String(candidate?.message ?? "").includes("admin_users.permissions")
+  );
+}
+
 export async function getAdminAccess(userId: string, email?: string | null): Promise<AdminAccess> {
-  const { data, error } = await supabaseAdmin
+  let { data, error } = await supabaseAdmin
     .from("admin_users")
     .select("user_id, active, role, permissions")
     .eq("user_id", userId)
     .eq("active", true)
     .maybeSingle();
+
+  // Keep administrator access working while an older database is still waiting
+  // for the RBAC migration that adds the optional permissions column.
+  if (isMissingPermissionsColumn(error)) {
+    const legacyResult = await supabaseAdmin
+      .from("admin_users")
+      .select("user_id, active, role")
+      .eq("user_id", userId)
+      .eq("active", true)
+      .maybeSingle();
+    data = legacyResult.data as typeof data;
+    error = legacyResult.error;
+  }
+
   if (!error && data?.user_id) {
     const role = normalizeAdminRole(data.role);
     return {

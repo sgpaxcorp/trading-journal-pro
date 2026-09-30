@@ -3150,7 +3150,7 @@ export default function OptionFlowPage() {
       const { data } = await supabaseBrowser.auth.getSession();
       const token = data?.session?.access_token;
       const res = token
-        ? await fetch("/api/smart-tools/access", {
+        ? await fetch("/api/smart-tools/access?feature=option_flow", {
             headers: { Authorization: `Bearer ${token}` },
           }).catch(() => null)
         : null;

@@ -14,10 +14,6 @@ export async function hasOptionFlowBetaAccess(userId?: string | null): Promise<b
   const { isSmartToolsOwner } = await import("@/lib/smartToolsAccess");
   if (await isSmartToolsOwner({ userId: normalizedUserId })) return true;
 
-  if (String(process.env.SMART_TOOLS_CLOSED_BETA ?? "true").toLowerCase() !== "false") {
-    return false;
-  }
-
   const { supabaseAdmin } = await import("@/lib/supaBaseAdmin");
   const { data, error } = await supabaseAdmin
     .from("user_entitlements")

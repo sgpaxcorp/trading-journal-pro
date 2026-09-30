@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { getAuthUser } from "@/lib/authServer";
+import {
+  getOptionFlowBetaApiPayload,
+  hasOptionFlowBetaAccess,
+  resolveOptionFlowLang,
+} from "@/lib/optionFlowBeta";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
-import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
@@ -12,8 +16,12 @@ export async function GET(req: Request) {
   try {
     const auth = await getAuthUser(req);
     if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const accessDenied = await requireSmartToolsOwner(auth);
-    if (accessDenied) return accessDenied;
+    if (!(await hasOptionFlowBetaAccess(auth.userId))) {
+      return NextResponse.json(
+        getOptionFlowBetaApiPayload(resolveOptionFlowLang(req.headers.get("accept-language"))),
+        { status: 403 }
+      );
+    }
 
     const limiter = await rateLimit(`option-flow-learning:${auth.userId}:${getClientIp(req)}`, {
       limit: 60,
