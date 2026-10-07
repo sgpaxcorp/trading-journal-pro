@@ -1,7 +1,17 @@
 import { PropsWithChildren, useMemo, useState } from "react";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Image,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
 import { useLanguage } from "../lib/LanguageContext";
 import { useTheme } from "../lib/ThemeContext";
@@ -110,7 +120,9 @@ export function ScreenScaffold({
         { paddingHorizontal: contentPadding },
       ]}
       alwaysBounceVertical
-      keyboardDismissMode="interactive"
+      automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+      contentInsetAdjustmentBehavior="automatic"
+      keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
       keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl

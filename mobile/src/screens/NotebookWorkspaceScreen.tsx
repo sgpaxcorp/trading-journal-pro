@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -663,10 +665,14 @@ export function NotebookWorkspaceScreen() {
       )}
 
       <Modal visible={!!manageTarget} transparent animationType="slide" onRequestClose={closeManage}>
-        <TouchableWithoutFeedback onPress={closeManage}>
-          <View style={styles.modalBackdrop}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalCard}>
+        <KeyboardAvoidingView
+          style={styles.modalKeyboardAvoider}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <TouchableWithoutFeedback onPress={closeManage}>
+            <View style={styles.modalBackdrop}>
+              <TouchableWithoutFeedback>
+                <View style={styles.modalCard}>
                 <View style={styles.modalHandle} />
                 <Text style={styles.modalTitle}>
                   {manageTarget?.kind === "book"
@@ -732,10 +738,11 @@ export function NotebookWorkspaceScreen() {
                     <Text style={styles.secondaryButtonText}>{t(language, "Delete", "Borrar")}</Text>
                   </Pressable>
                 </View>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
     </ScreenScaffold>
   );
@@ -929,6 +936,9 @@ const createStyles = (colors: ThemeColors) =>
       flex: 1,
       backgroundColor: colors.overlay,
       justifyContent: "flex-end",
+    },
+    modalKeyboardAvoider: {
+      flex: 1,
     },
     modalCard: {
       backgroundColor: colors.surface,

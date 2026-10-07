@@ -62,6 +62,33 @@ async function deleteSupportStorage(userId: string) {
   }
 }
 
+async function removeStoragePrefix(bucketName: string, prefix: string) {
+  const bucket = supabaseAdmin.storage.from(bucketName);
+  const queue = [prefix];
+  const paths: string[] = [];
+  while (queue.length) {
+    const current = queue.shift() as string;
+    let offset = 0;
+    while (true) {
+      const { data, error } = await bucket.list(current, { limit: 100, offset });
+      if (error) return { bucket: bucketName, removed: 0, skipped: true };
+      const rows = Array.isArray(data) ? data : [];
+      for (const row of rows) {
+        const path = `${current}/${row.name}`;
+        if (row.id == null) queue.push(path);
+        else paths.push(path);
+      }
+      if (rows.length < 100) break;
+      offset += rows.length;
+    }
+  }
+  for (let index = 0; index < paths.length; index += 100) {
+    const { error } = await bucket.remove(paths.slice(index, index + 100));
+    if (error) return { bucket: bucketName, removed: index, skipped: true };
+  }
+  return { bucket: bucketName, removed: paths.length };
+}
+
 async function recreateDefaultAccount(userId: string) {
   const { data, error } = await supabaseAdmin
     .from("trading_accounts")
@@ -117,7 +144,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email confirmation does not match this account." }, { status: 400 });
     }
 
-    const storage = await deleteSupportStorage(userId);
+    const storage = [
+      await deleteSupportStorage(userId),
+      await removeStoragePrefix("option_flow_sources", userId),
+    ];
     const deletes: DeleteResult[] = [await deleteCapitalAccounts(userId)];
 
     const tablesInDeleteOrder = [
@@ -129,6 +159,7 @@ export async function POST(req: NextRequest) {
       "ai_coach_memory",
       "option_flow_chat_messages",
       "option_flow_chat_sessions",
+      "option_flow_profiles",
       "option_flow_learning_runs",
       "option_flow_uploads",
       "option_flow_outcomes",

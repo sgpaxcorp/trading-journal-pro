@@ -15,8 +15,9 @@ describe("waitlist campaign", () => {
     expect(WAITLIST_CAMPAIGN.discountLimit).toBe(500);
     expect(WAITLIST_CAMPAIGN.discountPercent).toBe(30);
     expect(WAITLIST_CAMPAIGN.discountPlan).toBe("annual");
-    expect(WAITLIST_CAMPAIGN.launchDateIso).toBe("2026-11-02T00:00:00-04:00");
-    expect(new Date(WAITLIST_CAMPAIGN.launchDateIso).toISOString()).toBe("2026-11-02T04:00:00.000Z");
+    expect(WAITLIST_CAMPAIGN.promotionCode).toBe("NEURO30");
+    expect(WAITLIST_CAMPAIGN.launchDateIso).toBe("2026-11-22T00:00:00-04:00");
+    expect(new Date(WAITLIST_CAMPAIGN.launchDateIso).toISOString()).toBe("2026-11-22T04:00:00.000Z");
     expect(WAITLIST_CAMPAIGN.launchDateTimeLabel.es).toContain("12:00 AM AST");
   });
 

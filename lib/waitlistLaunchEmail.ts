@@ -48,7 +48,7 @@ function resolveAnnualDiscountUrl() {
 }
 
 export function getWaitlistLaunchPromoCode() {
-  return process.env.WAITLIST_ANNUAL_PROMO_CODE?.trim() || "";
+  return process.env.WAITLIST_ANNUAL_PROMO_CODE?.trim() || WAITLIST_CAMPAIGN.promotionCode;
 }
 
 export function getWaitlistLaunchEmailStatus() {

@@ -25,7 +25,10 @@ loadLocalEnv();
 const secret = process.env.STRIPE_SECRET_KEY;
 if (!secret) throw new Error("STRIPE_SECRET_KEY is required.");
 
-const couponId = String(process.env.WAITLIST_ANNUAL_PROMO_CODE || "NEURO30")
+const promotionCode = String(process.env.WAITLIST_ANNUAL_PROMO_CODE || "NEURO30")
+  .trim()
+  .toUpperCase();
+const couponId = String(process.env.WAITLIST_ANNUAL_COUPON_ID || `${promotionCode}_ANNUAL_2026`)
   .trim()
   .toUpperCase();
 const annualPriceIds = [
@@ -58,20 +61,58 @@ if (existing) {
     existing.duration === "once" &&
     JSON.stringify(existingProducts) === JSON.stringify(expectedProducts);
   if (!valid) throw new Error(`Existing coupon ${couponId} does not match the approved launch terms.`);
-  console.log(JSON.stringify({ ok: true, created: false, couponId, percentOff: 30, duration: "once" }));
-  process.exit(0);
+} else {
+  existing = await stripe.coupons.create({
+    id: couponId,
+    name: "NeuroTrader annual launch 30%",
+    percent_off: 30,
+    duration: "once",
+    applies_to: { products },
+    metadata: {
+      campaign: "2026_launch_waitlist",
+      eligibility: "first_500_verified_waitlist_emails",
+    },
+  });
 }
 
-await stripe.coupons.create({
-  id: couponId,
-  name: "NeuroTrader annual launch 30%",
-  percent_off: 30,
-  duration: "once",
-  applies_to: { products },
-  metadata: {
-    campaign: "2026_launch_waitlist",
-    eligibility: "first_500_verified_waitlist_emails",
-  },
+const activePromotionCodes = await stripe.promotionCodes.list({
+  code: promotionCode,
+  active: true,
+  limit: 10,
 });
+let stripePromotionCode = activePromotionCodes.data.find(
+  (candidate) => String(candidate.code || "").trim().toUpperCase() === promotionCode
+);
 
-console.log(JSON.stringify({ ok: true, created: true, couponId, percentOff: 30, duration: "once" }));
+if (stripePromotionCode) {
+  const linkedCoupon = stripePromotionCode.promotion?.coupon;
+  const linkedCouponId = typeof linkedCoupon === "string" ? linkedCoupon : linkedCoupon?.id;
+  const validPromotionCode =
+    linkedCouponId === couponId &&
+    stripePromotionCode.active &&
+    stripePromotionCode.max_redemptions === 500;
+  if (!validPromotionCode) {
+    throw new Error(`Existing promotion code ${promotionCode} does not match the approved launch terms.`);
+  }
+} else {
+  stripePromotionCode = await stripe.promotionCodes.create({
+    promotion: { type: "coupon", coupon: couponId },
+    code: promotionCode,
+    max_redemptions: 500,
+    metadata: {
+      campaign: "2026_launch_waitlist",
+      eligibility: "first_500_verified_waitlist_emails",
+    },
+  });
+}
+
+console.log(JSON.stringify({
+  ok: true,
+  couponId,
+  promotionCode,
+  promotionCodeId: stripePromotionCode.id,
+  percentOff: 30,
+  duration: "once",
+  maxRedemptions: 500,
+  annualProductIds: products,
+}));

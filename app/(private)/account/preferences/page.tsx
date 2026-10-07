@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Moon, Sun } from "lucide-react";
+import { Activity, Moon, Sun } from "lucide-react";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 
 import { useAppSettings, type AppLocale, type AppTheme } from "@/lib/appSettings";
+import { APP_RELEASE } from "@/lib/appRelease";
 import { resolveLocale, t } from "@/lib/i18n";
 
 export default function AccountPreferencesPage() {
@@ -234,6 +235,36 @@ export default function AccountPreferencesPage() {
                   : "The language applies immediately across the platform and also guides the AI Coach language."}
               </p>
             </div>
+          </div>
+        </section>
+
+        <section
+          className="flex flex-col gap-4 rounded-2xl border border-emerald-400/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.09),rgba(15,23,42,0.82)_45%,rgba(15,23,42,0.94))] p-5 sm:flex-row sm:items-center sm:justify-between"
+          aria-label={lang === "es" ? "Información de la aplicación" : "Application information"}
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-400/30 bg-emerald-400/10 text-emerald-300 shadow-[0_0_24px_rgba(16,185,129,0.08)]">
+              <Activity size={18} aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-100">NeuroTrader Journal</p>
+              <p className="mt-0.5 text-[11px] leading-4 text-slate-400">
+                {lang === "es"
+                  ? "Usa estos datos cuando contactes a soporte."
+                  : "Reference these details when contacting support."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <span className="rounded-full border border-slate-700 bg-slate-950/65 px-3 py-1.5 text-[11px] font-semibold tabular-nums text-slate-200">
+              {lang === "es" ? "Versión" : "Version"} {APP_RELEASE.version}
+            </span>
+            {APP_RELEASE.build ? (
+              <span className="rounded-full border border-slate-800 bg-slate-950/45 px-3 py-1.5 text-[11px] font-medium tabular-nums text-slate-400">
+                {lang === "es" ? "Compilación" : "Build"} {APP_RELEASE.build}
+              </span>
+            ) : null}
           </div>
         </section>
 

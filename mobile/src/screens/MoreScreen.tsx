@@ -1,5 +1,7 @@
 import { Alert, Keyboard, Linking, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import * as Application from "expo-application";
+import Constants, { ExecutionEnvironment } from "expo-constants";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
@@ -23,6 +25,18 @@ export function SettingsScreen({
   const { language, setLanguage } = useLanguage();
   const { colors, mode: themeMode, setMode } = useTheme();
   const user = useSupabaseUser();
+  const configuredVersion = Constants.expoConfig?.version ?? "—";
+  const configuredBuild =
+    Platform.OS === "ios"
+      ? Constants.expoConfig?.ios?.buildNumber
+      : Constants.expoConfig?.android?.versionCode?.toString();
+  const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+  const appVersion = isExpoGo
+    ? configuredVersion
+    : Application.nativeApplicationVersion ?? configuredVersion;
+  const appBuild = isExpoGo
+    ? configuredBuild
+    : Application.nativeBuildVersion ?? configuredBuild;
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -857,6 +871,43 @@ export function SettingsScreen({
           {signOutLoading ? t(language, "Signing out…", "Cerrando sesión…") : t(language, "Sign out", "Cerrar sesión")}
         </Text>
       </Pressable>
+
+      <View
+        style={styles.appInfoFooter}
+        accessible
+        accessibilityLabel={t(
+          language,
+          `NeuroTrader Journal version ${appVersion}${appBuild ? `, build ${appBuild}` : ""}`,
+          `NeuroTrader Journal versión ${appVersion}${appBuild ? `, compilación ${appBuild}` : ""}`
+        )}
+      >
+        <View style={styles.appInfoBrandRow}>
+          <View style={styles.appInfoMark}>
+            <Ionicons name="pulse" size={14} color={colors.primary} />
+          </View>
+          <Text style={styles.appInfoProduct}>NeuroTrader Journal</Text>
+        </View>
+        <View style={styles.appInfoVersionRow}>
+          <Text style={styles.appInfoVersion}>
+            {t(language, "Version", "Versión")} {appVersion}
+          </Text>
+          {appBuild ? (
+            <>
+              <View style={styles.appInfoDot} />
+              <Text style={styles.appInfoBuild}>
+                {t(language, "Build", "Compilación")} {appBuild}
+              </Text>
+            </>
+          ) : null}
+        </View>
+        <Text style={styles.appInfoHint}>
+          {t(
+            language,
+            "Reference this version when contacting support.",
+            "Indica esta versión cuando contactes a soporte."
+          )}
+        </Text>
+      </View>
     </ScreenScaffold>
   );
 }
@@ -1080,6 +1131,65 @@ const createStyles = (colors: ThemeColors) => {
       color: colors.dangerText,
       fontWeight: "700",
       fontSize: 13,
+    },
+    appInfoFooter: {
+      alignItems: "center",
+      marginTop: 8,
+      paddingTop: 20,
+      paddingBottom: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      gap: 5,
+    },
+    appInfoBrandRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+    },
+    appInfoMark: {
+      width: 24,
+      height: 24,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.successSoft,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    appInfoProduct: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontWeight: "800",
+      letterSpacing: 0.3,
+    },
+    appInfoVersionRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+    },
+    appInfoVersion: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: "700",
+    },
+    appInfoDot: {
+      width: 3,
+      height: 3,
+      borderRadius: 2,
+      backgroundColor: colors.textMuted,
+      opacity: 0.7,
+    },
+    appInfoBuild: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: "600",
+    },
+    appInfoHint: {
+      color: colors.textMuted,
+      fontSize: 10,
+      lineHeight: 14,
+      textAlign: "center",
+      opacity: 0.8,
     },
   });
 };

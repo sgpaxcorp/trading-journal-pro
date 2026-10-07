@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Image,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
 import { useLanguage } from "../lib/LanguageContext";
 import { apiPost } from "../lib/api";
@@ -90,7 +100,14 @@ export function ResetPasswordScreen({
   }
 
   return (
-    <View style={styles.root}>
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.content}
+      automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+      contentInsetAdjustmentBehavior="automatic"
+      keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+      keyboardShouldPersistTaps="handled"
+    >
       <View style={styles.card}>
         <View style={styles.logoWrap}>
           {/* eslint-disable-next-line jsx-a11y/alt-text */}
@@ -154,7 +171,7 @@ export function ResetPasswordScreen({
           <Text style={styles.secondaryButtonText}>{t(language, "Back", "Volver")}</Text>
         </Pressable>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -163,6 +180,9 @@ const createStyles = (colors: ThemeColors) =>
     root: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    content: {
+      flexGrow: 1,
       padding: 16,
       justifyContent: "center",
     },

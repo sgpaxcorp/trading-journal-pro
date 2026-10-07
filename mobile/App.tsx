@@ -28,6 +28,7 @@ import { NotebookEditorScreen } from "./src/screens/NotebookEditorScreen";
 import { BrokerConnectScreen } from "./src/screens/BrokerConnectScreen";
 import { BusinessPlanScreen } from "./src/screens/BusinessPlanScreen";
 import { DailyInvestmentOfficeScreen } from "./src/screens/DailyInvestmentOfficeScreen";
+import { OptionFlowScreen } from "./src/screens/OptionFlowScreen";
 import { AuthScreen } from "./src/screens/AuthScreen";
 import { ResetPasswordScreen } from "./src/screens/ResetPasswordScreen";
 import { ThemeProvider, useTheme } from "./src/lib/ThemeContext";
@@ -79,6 +80,7 @@ type RootStackParamList = {
   BrokerConnect: undefined;
   BusinessPlan: undefined;
   DailyInvestmentOffice: undefined;
+  OptionFlow: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -171,6 +173,15 @@ function MainTabs() {
     navigation.navigate("DailyInvestmentOffice");
   }, [navigation]);
 
+  const openOptionFlow = useCallback(() => {
+    const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
+    if (parent) {
+      parent.navigate("OptionFlow");
+      return;
+    }
+    navigation.navigate("OptionFlow");
+  }, [navigation]);
+
   return (
       <Tab.Navigator
         detachInactiveScreens
@@ -219,6 +230,7 @@ function MainTabs() {
               onOpenNotebook={openNotebook}
               onOpenAICoach={() => navigation.navigate("Tabs", { screen: "AICoach" })}
               onOpenDailyInvestmentOffice={openDailyInvestmentOffice}
+              onOpenOptionFlow={openOptionFlow}
             />
           )}
         </Tab.Screen>
@@ -1100,6 +1112,11 @@ function AppShell() {
             name="DailyInvestmentOffice"
             component={DailyInvestmentOfficeScreen}
             options={{ title: t(language, "Investment Office", "Oficina de Inversiones") }}
+          />
+          <Stack.Screen
+            name="OptionFlow"
+            component={OptionFlowScreen}
+            options={{ title: "Option Flow Intelligence" }}
           />
         </Stack.Navigator>
       )}

@@ -36,6 +36,42 @@ export function advanceActualAccountBalance(params: {
   return Number(next.toFixed(2));
 }
 
+export type ResolvedAccountEquity = {
+  accountEquity: number;
+  estimatedEquity: number;
+  reconciliationAdjustment: number;
+  source: "synced" | "calculated";
+};
+
+/**
+ * Uses a synchronized broker/account ending balance when one is available.
+ * The ledger estimate remains available so the UI can explain any difference
+ * without adding the same deposit or withdrawal twice.
+ */
+export function resolveAccountEquity(params: {
+  startingBalance: number;
+  tradingPnl: number;
+  cashflow: number;
+  syncedCurrentBalance?: number | null;
+}): ResolvedAccountEquity {
+  const estimatedEquity = Number(
+    (params.startingBalance + params.tradingPnl + params.cashflow).toFixed(2)
+  );
+  const synced = Number(params.syncedCurrentBalance);
+  const hasSyncedBalance =
+    params.syncedCurrentBalance != null && Number.isFinite(synced);
+  const accountEquity = hasSyncedBalance
+    ? Number(synced.toFixed(2))
+    : estimatedEquity;
+
+  return {
+    accountEquity,
+    estimatedEquity,
+    reconciliationAdjustment: Number((accountEquity - estimatedEquity).toFixed(2)),
+    source: hasSyncedBalance ? "synced" : "calculated",
+  };
+}
+
 type AccountSeriesRangeInput = {
   requestedFromDate?: string | null;
   requestedToDate?: string | null;

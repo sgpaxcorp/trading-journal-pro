@@ -194,9 +194,9 @@ credentials.alignment = WD_TABLE_ALIGNMENT.CENTER
 credentials.style = "Table Grid"
 credential_data = [
     ("Main review email", "appreview@neurotrader-journal.com"),
-    ("Main review password", "UxjsjvB0ZFimdxdwbAzNci26"),
+    ("Main review password", "NeuroTrader@2026"),
     ("Deletion test email", "appreview-delete@neurotrader-journal.com"),
-    ("Deletion test password", "UxjsjvB0ZFimdxdwbAzNci26"),
+    ("Deletion test password", "NeuroTrader@2026"),
     ("Sample files", "Not required; synthetic review data is preloaded"),
 ]
 for row, values in zip(credentials.rows, credential_data):
@@ -208,13 +208,13 @@ for row, values in zip(credentials.rows, credential_data):
             row.cells[index].paragraphs[0].runs[0].bold = True
 
 add_step(doc, 1, "Install and launch the latest submitted build. No sample-file upload is required.")
-add_step(doc, 2, "At Sign in, use the main review email appreview@neurotrader-journal.com and password UxjsjvB0ZFimdxdwbAzNci26.")
+add_step(doc, 2, "At Sign in, use the main review email appreview@neurotrader-journal.com and password NeuroTrader@2026.")
 add_step(doc, 3, "Business Center opens with the preloaded Two-Year Growth Demo personal account.")
 add_step(doc, 4, "Open Trading Business Plan to review the simulated $10,000 starting balance, $250,000 target, two-year dates, risk limits, checkpoints, and completed-cycle continuation recommendation.")
 add_step(doc, 5, "Open P&L and September 10, 2026 in Execution Journal to inspect populated stock, listed option-contract, crypto, and forex transactions.")
 add_step(doc, 6, "Open KPIs, Business Notebook, and Coach. A suggested coach question is Analyze my two-year plan objectively.")
 add_step(doc, 7, "Open Settings to inspect notification consent, Privacy Policy, Terms and Conditions, support, sign out, workspace reset, and permanent account deletion.")
-add_step(doc, 8, "For deletion testing, sign out and use appreview-delete@neurotrader-journal.com with password UxjsjvB0ZFimdxdwbAzNci26. Complete the Delete account flow in Settings.")
+add_step(doc, 8, "For deletion testing, sign out and use appreview-delete@neurotrader-journal.com with password NeuroTrader@2026. Complete the Delete account flow in Settings.")
 
 heading = doc.add_heading("4 External services tools and platforms", level=1)
 keep_with_next(heading)

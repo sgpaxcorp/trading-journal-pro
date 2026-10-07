@@ -5,7 +5,6 @@ import {
   FlatList,
   InputAccessoryView,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -1338,7 +1337,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
         )}
       </View>
 
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <View>
         <View style={styles.inputRow}>
           <TextInput
             style={styles.input}
@@ -1371,7 +1370,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
             "Coaching de proceso únicamente — sin señales de compra/venta, selección de valores ni colocación de órdenes."
           )}
         </Text>
-      </KeyboardAvoidingView>
+      </View>
       {Platform.OS === "ios" ? (
         <InputAccessoryView nativeID={COACH_INPUT_ACCESSORY_ID} backgroundColor={colors.surface}>
           <View style={styles.keyboardAccessory}>

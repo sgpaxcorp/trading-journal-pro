@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   advanceActualAccountBalance,
   endingBalanceFromJournalNotes,
+  resolveAccountEquity,
   resolveAccountSeriesRange,
 } from "@/lib/accountBalanceSnapshot";
 
@@ -38,6 +39,36 @@ describe("account balance snapshots", () => {
         cashflow: 0,
       })
     ).toBe(1017.56);
+  });
+
+  it("prefers synchronized account equity without adding cashflow twice", () => {
+    expect(
+      resolveAccountEquity({
+        startingBalance: 1008.21,
+        tradingPnl: -618.73,
+        cashflow: 1000,
+        syncedCurrentBalance: 1022.43,
+      })
+    ).toEqual({
+      accountEquity: 1022.43,
+      estimatedEquity: 1389.48,
+      reconciliationAdjustment: -367.05,
+      source: "synced",
+    });
+  });
+
+  it("falls back to the ledger estimate when no synchronized balance exists", () => {
+    expect(
+      resolveAccountEquity({
+        startingBalance: 1008.21,
+        tradingPnl: -618.73,
+        cashflow: 1000,
+      })
+    ).toMatchObject({
+      accountEquity: 1389.48,
+      estimatedEquity: 1389.48,
+      source: "calculated",
+    });
   });
 
   it("includes actual activity that happened before a future plan start", () => {

@@ -38,6 +38,7 @@ import {
   type TradingAccountType,
 } from "@/lib/fundedAccounts";
 import { resolveDailyGoalStatus } from "@/lib/dashboardCoachPlan";
+import { calculatePlanRecovery } from "@/lib/planRecovery";
 
 import TopNav from "@/app/components/TopNav";
 
@@ -3080,6 +3081,11 @@ export default function DashboardPage() {
     if (id === "plan-progress") {
       const currentTargetGap = currentBalance - accountStage.target;
       const currentTargetProgress = Math.max(0, Math.min(100, accountStage.progress * 100));
+      const recoverySnapshot = calculatePlanRecovery({
+        currentBalance,
+        checkpointStart: accountStage.start,
+        checkpointTarget: accountStage.target,
+      });
       const currentTargetLabel =
         currentTargetGap >= 0
           ? L("Ahead of current target", "Adelantado vs meta actual")
@@ -3193,9 +3199,86 @@ export default function DashboardPage() {
                   : ""}
               </p>
               <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                {L("Trading growth:", "Crecimiento de trading:")} {formatCurrency(Number(adaptivePlanSummary.requestedTradingGrowthUsd ?? 0))}
-                {` · ${L("Contributions:", "Aportaciones:")} ${formatCurrency(Number(adaptivePlanSummary.requestedDepositsUsd ?? 0))}`}
-                {` · ${L("Withdrawals:", "Retiros:")} ${formatCurrency(Number(adaptivePlanSummary.requestedWithdrawalsUsd ?? 0))}`}
+                {L("Projected trading growth:", "Crecimiento proyectado de trading:")} {formatCurrency(Number(adaptivePlanSummary.requestedTradingGrowthUsd ?? 0))}
+                {` · ${L("Planned contributions:", "Aportaciones planificadas:")} ${formatCurrency(Number(adaptivePlanSummary.requestedDepositsUsd ?? 0))}`}
+                {` · ${L("Planned withdrawals:", "Retiros planificados:")} ${formatCurrency(Number(adaptivePlanSummary.requestedWithdrawalsUsd ?? 0))}`}
+              </p>
+            </div>
+          ) : null}
+
+          {recoverySnapshot.active ? (
+            <div className="mt-3 rounded-xl border border-amber-400/30 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.16),_transparent_48%),linear-gradient(180deg,_rgba(15,23,42,0.94),_rgba(2,6,23,0.98))] p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200">
+                    {L("Recovery phase", "Fase de recuperación")}
+                  </p>
+                  <p className="mt-1 text-[17px] font-semibold text-slate-100">
+                    {L("Restore the checkpoint baseline", "Recuperar la base del checkpoint")}
+                  </p>
+                </div>
+                <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-[11px] font-semibold text-amber-200">
+                  {L("Active", "Activa")}
+                </span>
+              </div>
+
+              <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                {[
+                  {
+                    key: "current-equity",
+                    label: L("Current equity", "Equity actual"),
+                    value: formatCurrency(recoverySnapshot.currentBalance),
+                    tone: "text-slate-100",
+                  },
+                  {
+                    key: "baseline",
+                    label: L("Checkpoint baseline", "Base del checkpoint"),
+                    value: formatCurrency(recoverySnapshot.checkpointStart),
+                    tone: "text-slate-100",
+                  },
+                  {
+                    key: "recovery-gap",
+                    label: L("Recovery gap", "Recuperación pendiente"),
+                    value: formatCurrency(recoverySnapshot.recoveryGap),
+                    tone: "text-amber-300",
+                  },
+                  {
+                    key: "planned-growth",
+                    label: L("Planned growth after recovery", "Crecimiento después de recuperar"),
+                    value: formatCurrency(recoverySnapshot.plannedGrowthAfterRecovery),
+                    tone: "text-emerald-300",
+                  },
+                ].map((card) => (
+                  <div key={card.key} className="rounded-xl border border-slate-800 bg-slate-950/45 p-3">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                      {card.label}
+                    </p>
+                    <p className={`mt-2 text-[16px] font-semibold ${card.tone}`}>
+                      {card.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[12px]">
+                <span className="text-slate-400">
+                  {L("Total remaining to checkpoint target", "Total restante hasta la meta del checkpoint")}
+                </span>
+                <span className="font-semibold text-amber-300">
+                  {formatCurrency(recoverySnapshot.totalRemaining)}
+                </span>
+              </div>
+              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                <div
+                  className="h-2 bg-linear-to-r from-amber-500 via-amber-300 to-emerald-300"
+                  style={{ width: `${recoverySnapshot.baselineCoveragePct}%` }}
+                />
+              </div>
+              <p className="mt-2 text-[12px] leading-snug text-slate-400">
+                {L(
+                  "The original target and date stay visible. The recovery calculation starts from actual equity and keeps the selected risk limits instead of increasing risk to recover faster.",
+                  "La meta y la fecha originales permanecen visibles. El cálculo de recuperación parte del equity real y mantiene los límites de riesgo seleccionados, sin aumentar el riesgo para recuperar más rápido."
+                )}
               </p>
             </div>
           ) : null}

@@ -13,6 +13,7 @@ import {
   subscribeToAlertEvents,
   undeliveredAlertEvents,
 } from "@/lib/alertsSupabase";
+import { mergeAlertPopupQueue, removeAlertPopupEvent } from "@/lib/alertPopupQueue";
 
 /**
  * GlobalAlertPopups
@@ -67,6 +68,8 @@ export default function GlobalAlertPopups() {
   const [busy, setBusy] = useState(false);
 
   const pullingRef = useRef(false);
+  const currentIdRef = useRef<string | null>(null);
+  const suppressedEventIdsRef = useRef<Set<string>>(new Set());
 
   const popData: PopupData | null = useMemo(() => {
     if (!current) return null;
@@ -106,18 +109,14 @@ export default function GlobalAlertPopups() {
 
       if (popupEvents.length === 0) return;
 
-      setQueue((prev) => {
-        // Merge unique by id, preserving order (new first)
-        const seen = new Set(prev.map((e) => e.id));
-        const merged: AlertEvent[] = [...prev];
-        for (const e of popupEvents) {
-          if (!seen.has(e.id)) {
-            merged.unshift(e);
-            seen.add(e.id);
-          }
-        }
-        return merged;
-      });
+      setQueue((prev) =>
+        mergeAlertPopupQueue({
+          current: prev,
+          incoming: popupEvents,
+          activeEventId: currentIdRef.current,
+          suppressedEventIds: suppressedEventIdsRef.current,
+        })
+      );
     } finally {
       pullingRef.current = false;
     }
@@ -131,9 +130,22 @@ export default function GlobalAlertPopups() {
 
     const next = queue[queue.length - 1];
     setQueue((prev) => prev.slice(0, -1));
+    currentIdRef.current = next.id;
     setCurrent(next);
     setOpen(true);
   }, [userId, current, queue]);
+
+  useEffect(() => {
+    currentIdRef.current = current?.id ?? null;
+  }, [current]);
+
+  useEffect(() => {
+    suppressedEventIdsRef.current.clear();
+    currentIdRef.current = null;
+    setQueue([]);
+    setCurrent(null);
+    setOpen(false);
+  }, [userId]);
 
   // When a new current event is shown, mark it delivered (popup + inapp + voice)
   useEffect(() => {
@@ -206,8 +218,12 @@ export default function GlobalAlertPopups() {
   }, [userId, pull]);
 
   const close = useCallback(() => {
+    const closingEventId = currentIdRef.current;
+    if (closingEventId) suppressedEventIdsRef.current.add(closingEventId);
+    setQueue((prev) => removeAlertPopupEvent(prev, closingEventId));
     setOpen(false);
     setCurrent(null);
+    currentIdRef.current = null;
   }, []);
 
   const onSnooze = useCallback(

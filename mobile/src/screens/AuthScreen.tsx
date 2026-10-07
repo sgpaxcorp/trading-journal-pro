@@ -176,6 +176,9 @@ export function AuthScreen() {
         { paddingTop: Math.max(insets.top + 12, 24), paddingBottom: Math.max(insets.bottom + 16, 28) },
         isTablet && styles.contentTablet,
       ]}
+      automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+      contentInsetAdjustmentBehavior="automatic"
+      keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
       keyboardShouldPersistTaps="handled"
       bounces={false}
     >

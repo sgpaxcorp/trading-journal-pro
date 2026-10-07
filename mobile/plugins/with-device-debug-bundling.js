@@ -82,43 +82,7 @@ const SCHEME_LAUNCH_DEBUG =
 const SCHEME_LAUNCH_RELEASE =
   '<LaunchAction\n      buildConfiguration = "Release"';
 const BUNDLE_PHASE_NAME = "Bundle React Native code and images";
-const HERMES_DSYM_PHASE_NAME = "Generate Hermes dSYM for Archive";
-const HERMES_DSYM_INPUT =
-  "$(PODS_XCFRAMEWORKS_BUILD_DIR)/hermes-engine/Pre-built/hermes.framework/hermes";
-const HERMES_DSYM_OUTPUT = "$(DWARF_DSYM_FOLDER_PATH)/hermes.framework.dSYM";
-const HERMES_DSYM_SCRIPT = `#!/bin/sh
-set -e
-
-# Vendored Hermes frameworks are not compiled by the app target, so Xcode does
-# not automatically place their dSYM in the archive. App Store Connect expects
-# a dSYM whose UUID matches the embedded framework.
-if [ "$CONFIGURATION" != "Release" ]; then
-  exit 0
-fi
-
-HERMES_BINARY="$PODS_XCFRAMEWORKS_BUILD_DIR/hermes-engine/Pre-built/hermes.framework/hermes"
-if [ ! -f "$HERMES_BINARY" ]; then
-  HERMES_BINARY="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/hermes.framework/hermes"
-fi
-
-if [ ! -f "$HERMES_BINARY" ]; then
-  echo "error: Hermes binary was not found; cannot create the archive dSYM."
-  exit 1
-fi
-
-HERMES_DSYM="$DWARF_DSYM_FOLDER_PATH/hermes.framework.dSYM"
-/usr/bin/xcrun dsymutil "$HERMES_BINARY" -o "$HERMES_DSYM"
-
-HERMES_UUID=$(/usr/bin/xcrun dwarfdump --uuid "$HERMES_BINARY" | /usr/bin/awk '{print $2}' | /usr/bin/sort -u | /usr/bin/tr '\\n' ' ')
-DSYM_UUID=$(/usr/bin/xcrun dwarfdump --uuid "$HERMES_DSYM" | /usr/bin/awk '{print $2}' | /usr/bin/sort -u | /usr/bin/tr '\\n' ' ')
-
-if [ -z "$HERMES_UUID" ] || [ "$HERMES_UUID" != "$DSYM_UUID" ]; then
-  echo "error: Hermes dSYM UUID mismatch. Binary=$HERMES_UUID dSYM=$DSYM_UUID"
-  exit 1
-fi
-
-echo "Hermes dSYM ready: $HERMES_UUID"
-`;
+const LEGACY_HERMES_DSYM_PHASE_NAME = "Generate Hermes dSYM for Archive";
 const EAS_ANDROID_SIGNING_HOOK = `// Allow EAS Build to inject Play Store signing credentials into release builds.
 def easBuildGradle = file("./eas-build.gradle")
 if (easBuildGradle.exists()) {
@@ -196,9 +160,23 @@ fi
 # (Optional) uncomment for debugging build logs:
 # echo "CONFIGURATION=$CONFIGURATION PLATFORM_NAME=$PLATFORM_NAME DEV=$DEV SKIP_BUNDLING=$SKIP_BUNDLING EXPO_USE_DEV_SERVER=$EXPO_USE_DEV_SERVER"
 
+# Preserve Hermes diagnostics while teaching the compiler about React Native
+# runtime globals and suppressing Metro's intentional eval fallback warning.
+HERMES_WRAPPER="$PROJECT_ROOT/scripts/hermesc-xcode-wrapper.sh"
+if [ -x "$HERMES_WRAPPER" ]; then
+  export HERMES_REAL_CLI_PATH="\${HERMES_CLI_PATH:-$PODS_ROOT/hermes-engine/destroot/bin/hermesc}"
+  export HERMES_CLI_PATH="$HERMES_WRAPPER"
+fi
+
+# Xcode 27 exports NO_COLOR while Expo enables FORCE_COLOR. Keeping both makes
+# every Metro worker emit a Node warning even though color output is harmless.
+unset NO_COLOR
+
 # Run React Native Xcode bundling script
 RN_XCODE_SCRIPT="$("$NODE_BINARY" --print "require('path').dirname(require.resolve('react-native/package.json')) + '/scripts/react-native-xcode.sh'")"
-"$RN_XCODE_SCRIPT"
+set -o pipefail
+"$RN_XCODE_SCRIPT" 2>&1 | sed \
+  -e 's/^warning: Bundler cache is empty, rebuilding (this may take a minute)$/note: Bundler cache is empty; rebuilding JavaScript bundle./'
 `;
 
 const unquote = (value) => String(value || "").replace(/^"(.*)"$/, "$1");
@@ -401,6 +379,7 @@ module.exports = function withDeviceDebugBundling(config) {
       buildConfig.buildSettings.MARKETING_VERSION = String(config.version || "1.0.0");
       buildConfig.buildSettings.ENABLE_USER_SCRIPT_SANDBOXING = "NO";
       buildConfig.buildSettings.IPHONEOS_DEPLOYMENT_TARGET = IOS_DEPLOYMENT_TARGET;
+      delete buildConfig.buildSettings.LM_FILTER_WARNINGS;
       removeDuplicateLibcxxFlag(buildConfig.buildSettings);
       buildConfig.buildSettings.CLANG_WARN_NULLABILITY_COMPLETENESS = "NO";
       buildConfig.buildSettings.LIBTOOLFLAGS = [
@@ -428,7 +407,7 @@ module.exports = function withDeviceDebugBundling(config) {
 
     const shellPhases =
       xcodeProject.hash?.project?.objects?.PBXShellScriptBuildPhase || {};
-    let hasHermesDsymPhase = false;
+    const legacyHermesPhaseIds = [];
     for (const [phaseId, phase] of Object.entries(shellPhases)) {
       if (phaseId.endsWith("_comment")) continue;
       if (!phase || typeof phase !== "object") continue;
@@ -438,28 +417,22 @@ module.exports = function withDeviceDebugBundling(config) {
           BUNDLE_SCRIPT.endsWith("\n") ? BUNDLE_SCRIPT : `${BUNDLE_SCRIPT}\n`
         );
       }
-      if (phaseName === HERMES_DSYM_PHASE_NAME) {
-        hasHermesDsymPhase = true;
-        phase.shellPath = "/bin/sh";
-        phase.shellScript = toPbxQuotedScript(HERMES_DSYM_SCRIPT);
-        phase.inputPaths = [`"${HERMES_DSYM_INPUT}"`];
-        phase.outputPaths = [`"${HERMES_DSYM_OUTPUT}"`];
-      }
+      if (phaseName === LEGACY_HERMES_DSYM_PHASE_NAME) legacyHermesPhaseIds.push(phaseId);
     }
 
-    if (!hasHermesDsymPhase) {
-      xcodeProject.addBuildPhase(
-        [],
-        "PBXShellScriptBuildPhase",
-        HERMES_DSYM_PHASE_NAME,
-        xcodeProject.getFirstTarget().uuid,
-        {
-          shellPath: "/bin/sh",
-          shellScript: HERMES_DSYM_SCRIPT,
-          inputPaths: [`"${HERMES_DSYM_INPUT}"`],
-          outputPaths: [`"${HERMES_DSYM_OUTPUT}"`],
-        }
-      );
+    if (legacyHermesPhaseIds.length) {
+      const nativeTargets =
+        xcodeProject.hash?.project?.objects?.PBXNativeTarget || {};
+      for (const target of Object.values(nativeTargets)) {
+        if (!target || typeof target !== "object" || !Array.isArray(target.buildPhases)) continue;
+        target.buildPhases = target.buildPhases.filter(
+          (phase) => !legacyHermesPhaseIds.includes(phase?.value)
+        );
+      }
+      for (const phaseId of legacyHermesPhaseIds) {
+        delete shellPhases[phaseId];
+        delete shellPhases[`${phaseId}_comment`];
+      }
     }
 
     return config;

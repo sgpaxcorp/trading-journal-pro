@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useAppSettings } from "@/lib/appSettings";
 import { useAuth } from "@/context/AuthContext";
 import { getAdminStatus } from "@/lib/adminStatus";
+import { APP_RELEASE } from "@/lib/appRelease";
 import { resolveLocale, t } from "@/lib/i18n";
 
 export default function Footer() {
@@ -111,11 +112,24 @@ export default function Footer() {
         </div>
 
         <div
-          className={`mt-7 border-t pt-4 text-center text-[11px] ${
+          className={`mt-7 flex flex-col items-center justify-between gap-2 border-t pt-4 text-center text-[11px] sm:flex-row sm:text-left ${
             isLight ? "border-slate-200 text-slate-500" : "border-slate-800 text-slate-500"
           }`}
         >
-          © {year} {t("footer.copyright", lang)}
+          <span>© {year} {t("footer.copyright", lang)}</span>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-semibold tabular-nums ${
+              isLight
+                ? "border-slate-300 bg-white/70 text-slate-600"
+                : "border-slate-700 bg-slate-950/70 text-slate-400"
+            }`}
+            aria-label={`${lang === "es" ? "Versión" : "Version"} ${APP_RELEASE.version}${
+              APP_RELEASE.build ? `, ${lang === "es" ? "compilación" : "build"} ${APP_RELEASE.build}` : ""
+            }`}
+          >
+            <span>{lang === "es" ? "Versión" : "Version"} {APP_RELEASE.version}</span>
+            {APP_RELEASE.build ? <span className="opacity-70">· {APP_RELEASE.build}</span> : null}
+          </span>
         </div>
       </div>
     </footer>

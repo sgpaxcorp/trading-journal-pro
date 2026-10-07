@@ -171,7 +171,9 @@ async function resolveStripeDiscount(inputCode: string) {
 }
 
 function isWaitlistLaunchCode(code: string) {
-  const configured = normalizePromoCode(process.env.WAITLIST_ANNUAL_PROMO_CODE);
+  const configured = normalizePromoCode(
+    process.env.WAITLIST_ANNUAL_PROMO_CODE || WAITLIST_CAMPAIGN.promotionCode
+  );
   return Boolean(configured && code === configured);
 }
 

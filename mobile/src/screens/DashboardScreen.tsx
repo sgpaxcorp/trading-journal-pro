@@ -30,6 +30,7 @@ type DashboardScreenProps = {
   onOpenNotebook: () => void;
   onOpenAICoach: () => void;
   onOpenDailyInvestmentOffice: () => void;
+  onOpenOptionFlow: () => void;
 };
 
 const coachBrain = require("../../assets/neurotrader-logo-icon.png");
@@ -1073,6 +1074,7 @@ export function DashboardScreen({
   onOpenNotebook,
   onOpenAICoach,
   onOpenDailyInvestmentOffice,
+  onOpenOptionFlow,
 }: DashboardScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
@@ -2299,6 +2301,12 @@ export function DashboardScreen({
                 icon: "briefcase-outline" as const,
                 label: t(language, "Investment Office", "Oficina de Inversiones"),
                 onPress: onOpenDailyInvestmentOffice,
+              },
+              {
+                key: "option-flow",
+                icon: "pulse-outline" as const,
+                label: t(language, "Option Flow Intelligence", "Inteligencia de Option Flow"),
+                onPress: onOpenOptionFlow,
               },
             ].map((action) => (
               <Pressable

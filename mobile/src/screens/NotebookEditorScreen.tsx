@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -291,43 +293,48 @@ export function NotebookEditorScreen() {
       )}
 
       <Modal visible={renameOpen} transparent animationType="fade" onRequestClose={() => setRenameOpen(false)}>
-        <TouchableWithoutFeedback onPress={() => setRenameOpen(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalCard}>
-                <Text style={styles.modalTitle}>{t(language, "Rename page", "Renombrar página")}</Text>
-                <Text style={styles.modalSubtitle}>
-                  {t(
-                    language,
-                    "Use a page title that feels clear inside the notebook library.",
-                    "Usa un título de página que se sienta claro dentro de la biblioteca del notebook."
-                  )}
-                </Text>
-                <TextInput
-                  value={renameValue}
-                  onChangeText={setRenameValue}
-                  placeholder={t(language, "Page title", "Título de la página")}
-                  placeholderTextColor={colors.textMuted}
-                  style={styles.modalInput}
-                  autoFocus
-                />
-                <View style={styles.modalActions}>
-                  <Pressable style={styles.secondaryButton} onPress={() => setRenameOpen(false)}>
-                    <Text style={styles.secondaryButtonText}>{t(language, "Cancel", "Cancelar")}</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.saveButton, renaming && styles.saveButtonDisabled]}
-                    onPress={handleRename}
-                  >
-                    <Text style={styles.saveButtonText}>
-                      {renaming ? t(language, "Saving…", "Guardando…") : t(language, "Apply", "Aplicar")}
-                    </Text>
-                  </Pressable>
+        <KeyboardAvoidingView
+          style={styles.modalKeyboardAvoider}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <TouchableWithoutFeedback onPress={() => setRenameOpen(false)}>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback>
+                <View style={styles.modalCard}>
+                  <Text style={styles.modalTitle}>{t(language, "Rename page", "Renombrar página")}</Text>
+                  <Text style={styles.modalSubtitle}>
+                    {t(
+                      language,
+                      "Use a page title that feels clear inside the notebook library.",
+                      "Usa un título de página que se sienta claro dentro de la biblioteca del notebook."
+                    )}
+                  </Text>
+                  <TextInput
+                    value={renameValue}
+                    onChangeText={setRenameValue}
+                    placeholder={t(language, "Page title", "Título de la página")}
+                    placeholderTextColor={colors.textMuted}
+                    style={styles.modalInput}
+                    autoFocus
+                  />
+                  <View style={styles.modalActions}>
+                    <Pressable style={styles.secondaryButton} onPress={() => setRenameOpen(false)}>
+                      <Text style={styles.secondaryButtonText}>{t(language, "Cancel", "Cancelar")}</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.saveButton, renaming && styles.saveButtonDisabled]}
+                      onPress={handleRename}
+                    >
+                      <Text style={styles.saveButtonText}>
+                        {renaming ? t(language, "Saving…", "Guardando…") : t(language, "Apply", "Aplicar")}
+                      </Text>
+                    </Pressable>
+                  </View>
                 </View>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
     </ScreenScaffold>
   );
@@ -413,6 +420,9 @@ const createStyles = (colors: ThemeColors) =>
       backgroundColor: colors.overlay,
       justifyContent: "center",
       padding: 18,
+    },
+    modalKeyboardAvoider: {
+      flex: 1,
     },
     modalCard: {
       borderRadius: 18,

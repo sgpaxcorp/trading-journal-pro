@@ -26,6 +26,7 @@ import { useUserPlan } from "@/hooks/useUserPlan";
 
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { resolveAccountEquity } from "@/lib/accountBalanceSnapshot";
 
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
@@ -87,6 +88,13 @@ type GrowthPlan = {
   planStartDate: string | null;
   createdAtIso: string;
   updatedAtIso: string;
+};
+
+type AccountSeriesSummary = {
+  totals?: {
+    currentBalance?: number | null;
+    endingBalanceSource?: string | null;
+  } | null;
 };
 
 function toNum(x: unknown, fb = 0): number {
@@ -248,6 +256,7 @@ export default function PlanPage() {
   const [plan, setPlan] = useState<GrowthPlan | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [cashflows, setCashflows] = useState<Cashflow[]>([]);
+  const [accountSeries, setAccountSeries] = useState<AccountSeriesSummary | null>(null);
   const [loadingData, setLoadingData] = useState(true);
 
   // form
@@ -310,6 +319,28 @@ export default function PlanPage() {
         setCashflows([]);
         setCashflowTableMissing(true);
       }
+
+      try {
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) {
+          setAccountSeries(null);
+        } else {
+          const response = await fetch(
+            `/api/account/series?accountId=${encodeURIComponent(activeAccountId)}`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+              cache: "no-store",
+            }
+          );
+          setAccountSeries(
+            response.ok ? ((await response.json()) as AccountSeriesSummary) : null
+          );
+        }
+      } catch (err) {
+        console.error("[PlanPage] account series load error:", err);
+        setAccountSeries(null);
+      }
     } finally {
       setLoadingData(false);
     }
@@ -354,7 +385,13 @@ export default function PlanPage() {
     const starting = plan?.startingBalance ?? 0;
 
     const tradingEquity = starting + totalTradingPnl; // PURE trading (no deposits/withdrawals)
-    const accountEquity = tradingEquity + cashflowNet; // real account equity after cashflows
+    const equityResolution = resolveAccountEquity({
+      startingBalance: starting,
+      tradingPnl: totalTradingPnl,
+      cashflow: cashflowNet,
+      syncedCurrentBalance: accountSeries?.totals?.currentBalance,
+    });
+    const accountEquity = equityResolution.accountEquity;
 
     const pct = dailyTargetPct(plan);
     const dailyGoalUsd = accountEquity * (pct / 100);
@@ -364,11 +401,13 @@ export default function PlanPage() {
       starting,
       tradingEquity,
       accountEquity,
+      accountEquitySource: equityResolution.source,
+      reconciliationAdjustment: equityResolution.reconciliationAdjustment,
       pct,
       dailyGoalUsd,
       maxLossUsd,
     };
-  }, [plan, totalTradingPnl, cashflowNet]);
+  }, [plan, totalTradingPnl, cashflowNet, accountSeries]);
 
   const progress = useMemo(() => {
     const target = plan?.targetBalance ?? 0;
@@ -586,6 +625,25 @@ export default function PlanPage() {
                     {cashflowNet >= 0 ? "+" : "-"}{fmtCurrency(Math.abs(cashflowNet))}
                   </span>
                 </div>
+                <div className="mt-1 text-[11px] text-slate-500">
+                  {balances.accountEquitySource === "synced"
+                    ? L(
+                        "Uses the latest synchronized ending balance.",
+                        "Usa el último balance final sincronizado."
+                      )
+                    : L(
+                        "Calculated from starting balance, trading P&L, and net cashflow.",
+                        "Calculado desde el balance inicial, P&L de trading y cashflow neto."
+                      )}
+                </div>
+                {balances.accountEquitySource === "synced" &&
+                Math.abs(balances.reconciliationAdjustment) >= 0.01 ? (
+                  <div className="mt-1 text-[11px] text-amber-300/90">
+                    {L("Ledger reconciliation:", "Reconciliación del ledger:")}{" "}
+                    {balances.reconciliationAdjustment >= 0 ? "+" : "-"}
+                    {fmtCurrency(Math.abs(balances.reconciliationAdjustment))}
+                  </div>
+                ) : null}
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
@@ -949,9 +1007,16 @@ export default function PlanPage() {
                       {L("and never counted as P&L.", "y nunca cuentan como P&L.")}
                     </li>
                     <li>
-                      {L("Goal dollars (and max-loss dollars) are computed from your", "Las metas en $ (y pérdidas máx) se calculan desde tu")}{" "}
-                      <span className="text-slate-200">{L("account equity", "equity de cuenta")}</span>{" "}
-                      = {L("trading equity", "trading equity")} + {L("net cashflows", "cashflows netos")}.
+                      {L(
+                        "Without a synchronized ending balance, account equity falls back to trading equity plus net cashflows.",
+                        "Sin un balance final sincronizado, el equity de cuenta usa como respaldo el equity de trading más los cashflows netos."
+                      )}
+                    </li>
+                    <li>
+                      {L(
+                        "When a synchronized ending balance exists, it becomes the authoritative account equity so a deposit already included by the broker is not added twice.",
+                        "Cuando existe un balance final sincronizado, ese valor se convierte en el equity autoritativo para no sumar dos veces un depósito que el bróker ya incluyó."
+                      )}
                     </li>
                   </ul>
                 </div>

@@ -208,6 +208,7 @@ export async function POST(req: NextRequest) {
       removeStoragePrefix("neuro-analysis-staging", userId).catch(() => 0),
       removeStoragePrefix("option_flow_reports", userId).catch(() => 0),
       removeStoragePrefix("option_flow_reports", `outcomes/${userId}`).catch(() => 0),
+      removeStoragePrefix("option_flow_sources", userId).catch(() => 0),
     ]);
     await deleteSupportData(userId);
     await supabaseAdmin.from("launch_waitlist").delete().eq("linked_user_id", userId);

@@ -7,7 +7,6 @@ import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 import {
   addCalendarDays,
   buildLateSessionTape,
-  buildLateSessionTrackedFlows,
   filterLateSessionFlowRows,
   flowRowSessionDate,
   flowSessionDates,
@@ -16,16 +15,35 @@ import {
   optionFlowUnderlyingsMatch,
   resolveSourceSessionDate,
 } from "@/lib/optionFlowLearning";
-import { scheduleOptionFlowLearning } from "@/lib/optionFlowLearningServer";
+import { runOptionFlowIntelligenceAgents } from "@/lib/optionFlowAgents";
+import {
+  buildOccOptionSymbol,
+  buildOptionFlowMarketEvidence,
+  buildOptionFlowOpenInterestIntelligence,
+  enforceOptionFlowThesisStatus,
+  normalizeOccOptionSymbol,
+  optionFlowTargetDate,
+  summarizeOptionFlowEvidenceWindow,
+  type OptionFlowAnalysisMode,
+  type OptionFlowHorizon,
+} from "@/lib/optionFlowIntelligence";
+import {
+  fetchOptionFlowDailyBars,
+  type OptionFlowDailyMarketBar,
+} from "@/lib/optionFlowMarketData";
+import {
+  optionFlowEventFingerprint,
+  persistOptionFlowAnalysis,
+} from "@/lib/optionFlowProfileServer";
 import { GPT_6_ASTRA_MODEL, openAiChatTuning } from "@/lib/openAiModelConfig";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const DEFAULT_MODEL = process.env.OPENAI_OPTIONFLOW_MODEL || GPT_6_ASTRA_MODEL;
 const VISION_MODEL = process.env.OPENAI_OPTIONFLOW_VISION_MODEL || GPT_6_ASTRA_MODEL;
 const MAX_SCREENSHOTS = 4;
 const MAX_SCREENSHOT_DATA_URL_CHARS = 7_000_000;
@@ -44,16 +62,27 @@ type DataQuality = {
   latestExpiry?: string | null;
   latestTimestamp?: string | null;
   isStale?: boolean;
+  evidencePeriodStart?: string | null;
+  evidencePeriodEnd?: string | null;
+  evidenceSessionCount?: number;
+  rowsWithoutVerifiedDate?: number;
+  priorUniqueEvents?: number;
+  newUniqueRows?: number;
+  repeatedRows?: number;
+  exactDuplicateFile?: boolean;
+  marketDataStatus?: "complete" | "partial" | "unavailable";
+  marketSessionsMatched?: number;
+  marketSessionsMissing?: number;
 };
 
-function parsePremiumToNumber(raw?: string | number | null): number {
-  if (raw == null) return 0;
-  if (typeof raw === "number") return Number.isFinite(raw) ? raw : 0;
+function parsePremiumToNumber(raw?: string | number | null): number | null {
+  if (raw == null) return null;
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
   const cleaned = raw.toString().replace(/[,$~\s]/g, "").toUpperCase();
   const match = cleaned.match(/([0-9.]+)([KMB])?/);
-  if (!match) return 0;
+  if (!match) return null;
   const num = Number(match[1]);
-  if (!Number.isFinite(num)) return 0;
+  if (!Number.isFinite(num)) return null;
   const mult =
     match[2] === "B" ? 1_000_000_000 : match[2] === "M" ? 1_000_000 : match[2] === "K" ? 1_000 : 1;
   return num * mult;
@@ -71,12 +100,27 @@ function parseNumber(raw?: string | number | null): number | null {
   return Number.isFinite(num) ? num : null;
 }
 
-function formatPremium(num: number): string {
-  if (!Number.isFinite(num)) return "";
+function formatPremium(num: number | null): string {
+  if (num == null || !Number.isFinite(num)) return "DATA NOT AVAILABLE";
   if (num >= 1_000_000_000) return `~${(num / 1_000_000_000).toFixed(1)}B`;
   if (num >= 1_000_000) return `~${(num / 1_000_000).toFixed(1)}M`;
   if (num >= 1_000) return `~${(num / 1_000).toFixed(1)}K`;
   return `~${num.toFixed(0)}`;
+}
+
+function addKnown(total: number | null, value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return total;
+  return (total ?? 0) + value;
+}
+
+function maxKnown(current: number | null, value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return current;
+  return current == null ? value : Math.max(current, value);
+}
+
+function sumKnown(values: Array<number | null | undefined>): number | null {
+  const available = values.filter((value): value is number => value != null && Number.isFinite(value));
+  return available.length ? available.reduce((sum, value) => sum + value, 0) : null;
 }
 
 function normalizeSide(raw?: string | null): "ASK" | "BID" | "MIXED" | "UNKNOWN" {
@@ -192,7 +236,7 @@ function normalizeFlowRow(row: Record<string, any>) {
   ]);
   const underlyingRaw = pickField(row, ["underlying", "underlying_symbol", "underlying symbol", "underlyingticker", "underlying ticker"]);
   const dateRaw = pickField(row, ["date", "trade date"]);
-  const expiryRaw = pickField(row, ["expiry", "expiration", "exp", "date"]);
+  const expiryRaw = pickField(row, ["expiry", "expiration", "expiration date", "exp"]);
   const strikeRaw = pickField(row, ["strike", "strk"]);
   const typeRaw = pickField(row, ["type", "call_put", "cp", "put_call"]);
   const sideRaw = pickField(row, [
@@ -204,8 +248,11 @@ function normalizeFlowRow(row: Record<string, any>) {
     "print",
   ]);
   const sizeRaw = pickField(row, ["size", "qty", "quantity", "volume"]);
+  const volumeRaw = pickField(row, ["volume", "vol"]);
   const premiumRaw = pickField(row, ["premium", "notional", "value", "cost"]);
   const oiRaw = pickField(row, ["oi", "open interest", "open_interest", "openinterest"]);
+  const oiChangeRaw = pickField(row, ["oi change", "oi_change", "open interest change", "open_interest_change"]);
+  const oiAsOfDateRaw = pickField(row, ["oi as of date", "open interest as of date", "oi date", "open_interest_date"]);
   const bidRaw = pickField(row, ["nbbo_bid", "nbbo bid", "bid"]);
   const askRaw = pickField(row, ["nbbo_ask", "nbbo ask", "ask"]);
   const tradeRaw = pickField(
@@ -225,8 +272,10 @@ function normalizeFlowRow(row: Record<string, any>) {
 
   const strike = parseNumber(strikeRaw);
   const size = parseNumber(sizeRaw);
+  const volume = parseNumber(volumeRaw);
   const premium = parsePremiumToNumber(premiumRaw);
   const oi = parseNumber(oiRaw);
+  const oiChange = parseNumber(oiChangeRaw);
   const bid = parseNumber(bidRaw);
   const ask = parseNumber(askRaw);
   const tradePrice = parseNumber(tradeRaw);
@@ -268,8 +317,13 @@ function normalizeFlowRow(row: Record<string, any>) {
     type: type || null,
     side,
     size,
+    volume,
     premium,
     oi,
+    oiChange,
+    oiAsOfDate: normalizeExpiry(
+      typeof oiAsOfDateRaw === "string" ? oiAsOfDateRaw : oiAsOfDateRaw != null ? String(oiAsOfDateRaw) : null
+    ),
     bid,
     ask,
     tradePrice,
@@ -285,7 +339,17 @@ function normalizeFlowRow(row: Record<string, any>) {
 function dedupeRows(rows: ReturnType<typeof normalizeFlowRow>[]) {
   const seen = new Set<string>();
   return rows.filter((row) => {
-    const key = [row.symbol, row.expiry, row.strike, row.type, row.side, row.size, row.premium, row.time]
+    const key = [
+      row.sourceSessionDate,
+      row.symbol,
+      row.expiry,
+      row.strike,
+      row.type,
+      row.side,
+      row.size,
+      row.premium,
+      row.timestamp ?? row.time,
+    ]
       .map((val) => (val == null ? "" : String(val)))
       .join("|");
     if (seen.has(key)) return false;
@@ -296,36 +360,41 @@ function dedupeRows(rows: ReturnType<typeof normalizeFlowRow>[]) {
 
 function aggregateRows(rows: ReturnType<typeof normalizeFlowRow>[]) {
   const expirations: Record<string, any> = {};
-  const flowTotals = {
-    callPremiumAsk: 0,
-    putPremiumAsk: 0,
-    callPremiumBid: 0,
-    putPremiumBid: 0,
+  const flowTotals: {
+    callPremiumAsk: number | null;
+    putPremiumAsk: number | null;
+    callPremiumBid: number | null;
+    putPremiumBid: number | null;
+  } = {
+    callPremiumAsk: null,
+    putPremiumAsk: null,
+    callPremiumBid: null,
+    putPremiumBid: null,
   };
   rows.forEach((row) => {
     const expiry = row.expiry || "unknown";
     if (!expirations[expiry]) expirations[expiry] = {};
     const key = `${row.strike ?? ""}|${row.type ?? ""}|${row.side}`;
     const bucket = expirations[expiry][key] ?? {
-      strike: row.strike ?? 0,
+      strike: row.strike ?? null,
       type: row.type ?? "",
       side: row.side,
       prints: 0,
-      sizeTotal: 0,
-      premiumTotal: 0,
-      oiMax: 0,
+      sizeTotal: null,
+      premiumTotal: null,
+      oiMax: null,
       read: row.side,
     };
     bucket.prints += 1;
-    bucket.sizeTotal += row.size ?? 0;
-    bucket.premiumTotal += row.premium ?? 0;
-    bucket.oiMax = Math.max(bucket.oiMax, row.oi ?? 0);
+    bucket.sizeTotal = addKnown(bucket.sizeTotal, row.size);
+    bucket.premiumTotal = addKnown(bucket.premiumTotal, row.premium);
+    bucket.oiMax = maxKnown(bucket.oiMax, row.oi);
     expirations[expiry][key] = bucket;
 
-    if (row.type === "C" && row.side === "ASK") flowTotals.callPremiumAsk += row.premium ?? 0;
-    if (row.type === "P" && row.side === "ASK") flowTotals.putPremiumAsk += row.premium ?? 0;
-    if (row.type === "C" && row.side === "BID") flowTotals.callPremiumBid += row.premium ?? 0;
-    if (row.type === "P" && row.side === "BID") flowTotals.putPremiumBid += row.premium ?? 0;
+    if (row.type === "C" && row.side === "ASK") flowTotals.callPremiumAsk = addKnown(flowTotals.callPremiumAsk, row.premium);
+    if (row.type === "P" && row.side === "ASK") flowTotals.putPremiumAsk = addKnown(flowTotals.putPremiumAsk, row.premium);
+    if (row.type === "C" && row.side === "BID") flowTotals.callPremiumBid = addKnown(flowTotals.callPremiumBid, row.premium);
+    if (row.type === "P" && row.side === "BID") flowTotals.putPremiumBid = addKnown(flowTotals.putPremiumBid, row.premium);
   });
 
   const expirationsList = Object.entries(expirations).map(([expiry, strikes]) => ({
@@ -352,12 +421,12 @@ async function extractRowsFromScreenshots(
   const systemPrompt = isEs
     ? `Extrae de screenshots de options flow una tabla JSON con filas normalizadas. No inventes datos.
 Devuelve solo JSON válido con la forma:
-{ "rows": [ { "symbol": "", "underlying": "", "expiry": "YYYY-MM-DD", "strike": 0, "type": "C|P", "side": "ASK|BID|MID|MIXED|UNKNOWN", "size": 0, "premium": 0, "oi": 0, "bid": 0, "ask": 0, "tradePrice": 0, "time": "" } ], "notes": "" }
-Si no puedes leer un campo, déjalo null. Máximo 120 filas.`
+{ "rows": [ { "symbol": "string|null", "underlying": "string|null", "date": "YYYY-MM-DD|null", "timestamp": "ISO-8601|null", "expiry": "YYYY-MM-DD|null", "strike": "number|null", "type": "C|P|null", "side": "ASK|BID|MID|MIXED|UNKNOWN", "size": "number|null", "volume": "number|null", "premium": "number|null", "oi": "number|null", "oiChange": "number|null", "oiAsOfDate": "YYYY-MM-DD|null", "bid": "number|null", "ask": "number|null", "tradePrice": "number|null", "time": "string|null" } ], "notes": "" }
+Si no puedes leer un campo o su fecha efectiva, déjalo null; nunca uses cero como sustituto. Máximo 120 filas.`
     : `Extract options flow screenshots into normalized JSON rows. Do not invent data.
 Return only valid JSON with shape:
-{ "rows": [ { "symbol": "", "underlying": "", "expiry": "YYYY-MM-DD", "strike": 0, "type": "C|P", "side": "ASK|BID|MID|MIXED|UNKNOWN", "size": 0, "premium": 0, "oi": 0, "bid": 0, "ask": 0, "tradePrice": 0, "time": "" } ], "notes": "" }
-If a field is missing, set it to null. Max 120 rows.`;
+{ "rows": [ { "symbol": "string|null", "underlying": "string|null", "date": "YYYY-MM-DD|null", "timestamp": "ISO-8601|null", "expiry": "YYYY-MM-DD|null", "strike": "number|null", "type": "C|P|null", "side": "ASK|BID|MID|MIXED|UNKNOWN", "size": "number|null", "volume": "number|null", "premium": "number|null", "oi": "number|null", "oiChange": "number|null", "oiAsOfDate": "YYYY-MM-DD|null", "bid": "number|null", "ask": "number|null", "tradePrice": "number|null", "time": "string|null" } ], "notes": "" }
+If a field or its effective date is missing, set it to null; never use zero as a substitute. Max 120 rows.`;
 
   const content: any = [
     { type: "text", text: JSON.stringify({ provider, instructions: systemPrompt }) },
@@ -396,6 +465,7 @@ function aggregateExpirations(expirations: any[]): any[] {
     const strikes = Array.isArray(exp?.strikes) ? exp.strikes : [];
     const map = new Map<string, any>();
     strikes.forEach((row: any) => {
+      if (row?.strike == null || row?.strike === "") return;
       const strike = Number(row?.strike);
       if (!Number.isFinite(strike)) return;
       const type = typeof row?.type === "string" ? row.type.toUpperCase() : "";
@@ -406,18 +476,18 @@ function aggregateExpirations(expirations: any[]): any[] {
         type,
         side,
         prints: 0,
-        sizeTotal: 0,
-        premiumTotal: 0,
-        oiMax: 0,
+        sizeTotal: null,
+        premiumTotal: null,
+        oiMax: null,
         read: row?.read ?? row?.side ?? "",
       };
       const prints = Number(row?.prints);
-      const size = Number(row?.sizeTotal);
+      const size = row?.sizeTotal == null ? null : Number(row.sizeTotal);
       existing.prints += Number.isFinite(prints) ? prints : 0;
-      existing.sizeTotal += Number.isFinite(size) ? size : 0;
-      existing.premiumTotal += parsePremiumToNumber(row?.premiumTotal);
-      const oi = Number(row?.oiMax);
-      if (Number.isFinite(oi)) existing.oiMax = Math.max(existing.oiMax, oi);
+      existing.sizeTotal = addKnown(existing.sizeTotal, Number.isFinite(size) ? size : null);
+      existing.premiumTotal = addKnown(existing.premiumTotal, parsePremiumToNumber(row?.premiumTotal));
+      const oi = row?.oiMax == null ? null : Number(row.oiMax);
+      existing.oiMax = maxKnown(existing.oiMax, Number.isFinite(oi) ? oi : null);
       map.set(key, existing);
     });
     const aggregated = Array.from(map.values()).map((row) => ({
@@ -452,15 +522,15 @@ function filterExpirationsBySpot(
 }
 
 function deriveFlowBiasFromTotals(flowTotals: {
-  callPremiumAsk: number;
-  putPremiumAsk: number;
-  callPremiumBid: number;
-  putPremiumBid: number;
+  callPremiumAsk: number | null;
+  putPremiumAsk: number | null;
+  callPremiumBid: number | null;
+  putPremiumBid: number | null;
 }): "bullish" | "bearish" | "mixed" | "neutral" {
-  const askTotal = (flowTotals?.callPremiumAsk ?? 0) + (flowTotals?.putPremiumAsk ?? 0);
-  const bidTotal = (flowTotals?.callPremiumBid ?? 0) + (flowTotals?.putPremiumBid ?? 0);
-  const total = askTotal + bidTotal;
-  if (!Number.isFinite(total) || total <= 0) return "neutral";
+  const askTotal = sumKnown([flowTotals?.callPremiumAsk, flowTotals?.putPremiumAsk]);
+  const bidTotal = sumKnown([flowTotals?.callPremiumBid, flowTotals?.putPremiumBid]);
+  const total = sumKnown([askTotal, bidTotal]);
+  if (askTotal == null || bidTotal == null || total == null || total <= 0) return "neutral";
   const ratio = (askTotal + 1) / (bidTotal + 1);
   if (ratio >= 1.25) return "bullish";
   if (ratio <= 0.8) return "bearish";
@@ -497,7 +567,7 @@ function deriveKeyLevelsFromExpirations(
       const premium =
         Number.isFinite(Number(row?.premiumTotalRaw))
           ? Number(row?.premiumTotalRaw)
-          : parsePremiumToNumber(row?.premiumTotal);
+          : parsePremiumToNumber(row?.premiumTotal) ?? 0;
       const size = Number(row?.sizeTotal);
       const prints = Number(row?.prints);
       const score = premium + (Number.isFinite(size) ? size * 100 : 0) + (Number.isFinite(prints) ? prints * 10 : 0);
@@ -557,69 +627,53 @@ function deriveContractPrice(row: ReturnType<typeof normalizeFlowRow>): number |
   return null;
 }
 
-function computeSqueezeCandidates(rows: ReturnType<typeof normalizeFlowRow>[], limit = 5) {
-  const groups = new Map<string, { key: string; expiry: string | null; strike: number | null; type: string | null; underlying: string | null; entries: any[] }>();
-  rows.forEach((row, idx) => {
-    const underlying = row.underlying || row.symbol;
-    const expiry = row.expiry;
-    const strike = Number(row.strike);
-    const type = row.type;
-    if (!underlying || !expiry || !Number.isFinite(strike) || !type) return;
-    const price = deriveContractPrice(row);
-    const oi = Number(row.oi);
-    if (!Number.isFinite(price) || !Number.isFinite(oi)) return;
-    const key = `${underlying}|${expiry}|${strike}|${type}`;
-    const entry = {
-      ts: row.timestamp || null,
-      order: idx,
-      price,
-      oi,
-    };
-    const existing =
-      groups.get(key) ??
-      { key, expiry, strike, type, underlying, entries: [] as any[] };
-    existing.entries.push(entry);
-    groups.set(key, existing);
+function computeUploadedOpenInterestEvidence(
+  rows: ReturnType<typeof normalizeFlowRow>[],
+  underlying: string,
+  fallbackDate: string
+) {
+  const snapshots = rows.flatMap((row) => {
+    const contractSymbol =
+      normalizeOccOptionSymbol(row.symbol) ??
+      buildOccOptionSymbol({
+        root: row.underlying ?? underlying,
+        expiry: row.expiry,
+        strike: row.strike,
+        optionType: row.type,
+      });
+    if (!contractSymbol) return [];
+    const sessionDate = flowRowSessionDate(row) ?? fallbackDate;
+    const bid = Number.isFinite(row.bid) ? row.bid : null;
+    const ask = Number.isFinite(row.ask) ? row.ask : null;
+    return [{
+      contractSymbol,
+      underlyingSymbol: underlying,
+      expiry: row.expiry,
+      strike: row.strike,
+      optionType: row.type === "C" ? "C" as const : row.type === "P" ? "P" as const : null,
+      snapshotKind: "imported_flow",
+      priceSessionDate: sessionDate,
+      openInterestAsOfDate: /^\d{4}-\d{2}-\d{2}$/.test(String(row.oiAsOfDate ?? ""))
+        ? row.oiAsOfDate
+        : null,
+      observedAt: row.timestamp ?? `${sessionDate}T21:00:00.000Z`,
+      sourceId: "uploaded_evidence",
+      openInterest: row.oi,
+      reportedOpenInterestChange: row.oiChange,
+      volume: row.volume,
+      lastPrice: deriveContractPrice(row),
+      bid,
+      ask,
+      midpoint: bid != null && ask != null ? (bid + ask) / 2 : null,
+      impliedVolatility: row.iv,
+      delta: row.delta,
+      underlyingPrice: row.underlyingPrice,
+      oiTemporalStatus: row.oiAsOfDate || Number.isFinite(row.oiChange)
+        ? "reported_by_source" as const
+        : "date_not_verified" as const,
+    }];
   });
-
-  const candidates = Array.from(groups.values())
-    .map((group) => {
-      const entries = group.entries
-        .slice()
-        .sort((a: any, b: any) => {
-          if (a.ts && b.ts) return a.ts.localeCompare(b.ts);
-          if (a.ts) return -1;
-          if (b.ts) return 1;
-          return a.order - b.order;
-        });
-      if (entries.length < 2) return null;
-      const first = entries[0];
-      const last = entries[entries.length - 1];
-      const oiChange = Number(last.oi) - Number(first.oi);
-      const priceChange = Number(last.price) - Number(first.price);
-      if (!Number.isFinite(oiChange) || !Number.isFinite(priceChange)) return null;
-      if (oiChange <= 0 || priceChange >= 0) return null;
-      const score = oiChange * Math.abs(priceChange);
-      return {
-        contract: `${group.underlying} ${group.expiry} ${group.strike}${group.type}`,
-        underlying: group.underlying,
-        expiry: group.expiry,
-        strike: group.strike,
-        type: group.type,
-        firstTime: first.ts,
-        lastTime: last.ts,
-        firstOi: Number(first.oi),
-        lastOi: Number(last.oi),
-        firstPrice: Number(first.price),
-        lastPrice: Number(last.price),
-        oiChange,
-        priceChange,
-        score,
-      };
-    })
-    .filter(Boolean) as any[];
-
-  return candidates.sort((a, b) => b.score - a.score).slice(0, limit);
+  return buildOptionFlowOpenInterestIntelligence(snapshots);
 }
 
 function safeRows(rows: any[], limit = 200) {
@@ -673,364 +727,135 @@ export async function POST(req: NextRequest) {
       provider,
       underlying,
       previousClose,
-      tradeIntent,
+      analysisMode,
+      horizon,
+      customTargetDate,
       sourceSessionDate,
+      flowSessionDate,
       rows,
       screenshotDataUrls,
       analystNotes,
       language,
+      sourceFile,
     } = body as {
       provider?: string;
       underlying?: string;
       previousClose?: number;
-      tradeIntent?: string;
+      analysisMode?: string;
+      horizon?: string;
+      customTargetDate?: string | null;
       sourceSessionDate?: string;
+      flowSessionDate?: string;
       rows?: any[];
       screenshotDataUrls?: string[];
       analystNotes?: string | null;
       language?: string;
+      sourceFile?: {
+        name?: string | null;
+        size?: number | null;
+        mimeType?: string | null;
+        sha256?: string | null;
+      } | null;
     };
 
-    const trimmedRows = safeRows(rows ?? [], 500);
+    const trimmedRows = safeRows(rows ?? [], 2_000);
     const safeScreenshots = safeScreenshotDataUrls(screenshotDataUrls);
     const safeAnalystNotes = String(analystNotes ?? "").slice(0, 3000);
-    const safeTradeIntent = String(tradeIntent ?? "").slice(0, 1000);
+    const safeAnalysisMode: OptionFlowAnalysisMode =
+      analysisMode === "forward_positioning" ? "forward_positioning" : "today";
+    const allowedHorizons: OptionFlowHorizon[] = [
+      "today",
+      "next_session",
+      "one_week",
+      "one_month",
+      "three_months",
+      "six_months",
+      "leaps",
+      "custom",
+    ];
+    const requestedHorizon = String(horizon ?? "") as OptionFlowHorizon;
+    const safeHorizon: OptionFlowHorizon = allowedHorizons.includes(requestedHorizon)
+      ? requestedHorizon
+      : safeAnalysisMode === "today"
+        ? "today"
+        : "one_month";
     const marketToday = marketDateKey(new Date());
-    const requestedSourceSessionDate = /^\d{4}-\d{2}-\d{2}$/.test(String(sourceSessionDate ?? "")) &&
-      String(sourceSessionDate) >= addCalendarDays(marketToday, -55) &&
-      String(sourceSessionDate) <= marketToday
-        ? String(sourceSessionDate)
+    const sourceDateFallback = sourceSessionDate ?? flowSessionDate;
+    const requestedSourceSessionDate = /^\d{4}-\d{2}-\d{2}$/.test(String(sourceDateFallback ?? "")) &&
+      String(sourceDateFallback) >= addCalendarDays(marketToday, -730) &&
+      String(sourceDateFallback) <= marketToday
+        ? String(sourceDateFallback)
         : null;
 
     const lang = String(language || "en").toLowerCase().startsWith("es") ? "es" : "en";
     const isEs = lang === "es";
-
-    const systemPrompt = isEs
-      ? `
-Eres un trader senior de floor en Wall Street especializado en opciones (ventas de prima, gamma, coberturas).
-Tu análisis debe sonar como un briefing profesional para traders institucionales: claro, directo y accionable.
-Analiza los últimos prints y responde SIEMPRE en español con un tono profesional tipo report de mesa.
-Organiza por expiración y prioriza strikes por premium/actividad y cercanía al spot (menciona la zona spot cuando sea posible).
-	IMPORTANTE: "expirations" ya viene agregada (prints/size/premium). Úsala para el resumen por strike; la cronología la gobierna "lateSessionTape".
-	Usa "flowTotals" y "flowFeatures" (ask/bid ratios) para inferir sesgo direccional de forma consistente.
-	El objetivo principal es explicar cómo los flows de AYER entre 1:30 PM y 4:15 PM ET pueden comportarse HOY.
-	Usa "lateSessionTape" como fuente cronológica principal y "sampleRows" solo como respaldo.
-	NO mezcles toda la tarde en un solo total. Compara 1:30-3:00, 3:00-3:30 y 3:30-4:15.
-	Da mayor peso a 3:30-4:15 como posicionamiento que puede continuar en la próxima sesión.
-	Separa el movimiento que probablemente ya se completó antes de las 3:00 de la señal que quedó abierta al cierre.
-	Cita contratos concretos con hora y entryOptionPrice. Ejemplo esperado: "entró cerca de 18, alcanzó 40 a las 10:15 AM" cuando la validación lo demuestre.
-	Un call/put en ASK es compra agresiva; un call/put en BID es venta agresiva. No llames compra a un BID.
-Identifica niveles reales (con etiqueta pivot/supply/demand/wall/friction), contratos con más potencial y escenarios
-de squeeze con condiciones claras. Evita frases genéricas; usa lecturas breves pero específicas.
-Incluye una conclusión final que resuma el sesgo y el mapa de niveles en 3-5 bullets.
-Incluye "observations" (hechos literales) e "inferences" (con soporte, confianza y alternativas si aplica).
-Incluye "scenarioMatrix" (alcista/bajista/rango) con trigger, confirmación, invalidación y riesgo.
-Si el símbolo subyacente aparece en los prints, incluye el símbolo en keyTrades[].details.symbol (ej: SPX, SPXW, NDX).
-Incluye lectura de prints grandes deep ITM solo como nota (no como nivel clave) si el OI es bajo.
-Si hay mezcla de prints BID/ASK, deja claro si es venta de prima o compra agresiva.
-En "expirations[].strikes" incluye los strikes más relevantes (6-10 por expiración) con prints/size/premium/OI y lectura rápida.
-En "keyLevels" prioriza 4-6 niveles máximos y describe por qué dominan el tape.
-IMPORTANTE: "keyLevels" YA viene calculado en el payload. Usa esos niveles tal cual para el análisis.
-En "tradingPlan" debes mencionar explícitamente los niveles más fuertes de "keyLevels" (con el precio exacto).
-No inventes niveles fuera de "keyLevels". Si necesitas citar niveles, elige de "keyLevels".
-NO inventes datos ni conclusiones fuera del payload. Si falta data, dilo explícitamente.
-No seas complaciente ni le digas al usuario lo que quiere escuchar: sé objetivo con la data.
-Si dataQuality.isStale es true (expiraciones ya vencidas o timestamps viejos), indica que la data es vieja (-1DTE o anterior) y que el análisis es histórico.
-Usa recentOutcomes solo como feedback contextual; no debe reemplazar la data actual.
-Usa recentValidations para calibrar cuánto tardaron flows similares en confirmarse o fallar, sin asumir que el patrón se repetirá.
-Incluye en "riskNotes" un disclosure corto indicando que el análisis se basa solo en la data enviada y puede estar incompleto si faltan prints BID/ASK o filas.
-IMPORTANTE: Solo considera flujo agresivo cuando el print está en ASK (entradas direccionales) o BID (venta de prima).
-Si está en MID/MIXED/UNKNOWN no lo clasifiques como agresivo.
-Considera las notas del trader (analystNotes) y el historial reciente (recentMemory) para mejorar el análisis.
-Devuelve exclusivamente JSON válido con esta forma:
-{
-  "summary": "resumen ejecutivo corto",
-  "flowBias": "bullish | bearish | mixed | neutral",
-  "lateSessionRead": {
-    "completedMove": "movimiento que probablemente ya se agotó ayer",
-    "regimeShift": "qué cambió, aproximadamente a qué hora y con qué evidencia",
-    "carryForward": "señal de 3:30-4:15 que puede continuar hoy",
-    "todayBehavior": "secuencia esperada para hoy: apertura, confirmación, hora/condición e invalidación",
-    "contractsToTrack": ["contrato + hora + precio de entrada + qué debe ocurrir hoy"]
-  },
-  "observations": ["O1 ...", "O2 ..."],
-  "inferences": [
-    { "statement": "I1 ...", "support": ["O1"], "confidence": "Alta|Media|Baja", "alternatives": ["..."] }
-  ],
-  "scenarioMatrix": {
-    "bullish": { "trigger": "...", "confirmation": "...", "invalidation": "...", "risk": "..." },
-    "bearish": { "trigger": "...", "confirmation": "...", "invalidation": "...", "risk": "..." },
-    "range": { "trigger": "...", "confirmation": "...", "invalidation": "...", "risk": "..." }
-  },
-  "expirations": [
-    {
-      "expiry": "YYYY-MM-DD",
-      "tenor": "0DTE | 1DTE | weekly | monthly | other",
-      "range": "zona spot aproximada",
-      "strikes": [
+    const normalizedRequestedUnderlying = normalizeSymbol(underlying);
+    if (!normalizedRequestedUnderlying) {
+      return NextResponse.json(
         {
-          "strike": 0,
-          "type": "C|P",
-          "prints": 0,
-          "sizeTotal": 0,
-          "premiumTotal": "~0",
-          "oiMax": 0,
-          "side": "ASK|BID|MIXED",
-          "read": "lectura rápida"
-        }
-      ],
-      "notes": "lectura por expiración",
-      "keyTakeaways": ["..."]
-    }
-  ],
-  "keyLevels": [
-    { "price": 0, "label": "pivot|supply|demand|wall|friction", "side": "BID|ASK|MIXED|UNKNOWN", "reason": "por qué es clave" }
-  ],
-  "contractsWithPotential": {
-    "gamma": ["contrato/strike + por qué"],
-    "directional": ["contrato/strike + por qué"],
-    "stress": ["contrato/strike + por qué"]
-  },
-  "squeezeScenarios": {
-    "upside": {
-      "condition": "condición para squeeze",
-      "candidates": ["..."],
-      "brakes": "freno principal"
-    },
-    "downside": {
-      "condition": "condición para squeeze",
-      "candidates": ["..."],
-      "brakes": "freno principal"
-    }
-  },
-  "tradingPlan": {
-    "headline": "titular corto del plan",
-    "steps": ["paso accionable 1", "paso 2", "paso 3"],
-    "invalidation": "qué invalida el plan",
-    "risk": "riesgos principales"
-  },
-  "keyTrades": [
-    {
-      "headline": "short title",
-      "whyItMatters": "1-2 sentences",
-      "details": { "symbol": "...", "strike": "...", "expiry": "...", "size": "...", "premium": "...", "side": "...", "time": "..." }
-    }
-  ],
-  "riskNotes": ["..."],
-  "suggestedFocus": ["..."]
-}
-`.trim()
-      : `
-You are a senior Wall Street floor trader specialized in options (premium selling, gamma, hedging).
-Your analysis must read like a professional institutional briefing: clear, direct, and actionable.
-Analyze the latest prints and ALWAYS respond in English with a professional desk-report tone.
-Organize by expiration and prioritize strikes by premium/activity and proximity to spot (mention spot zone when possible).
-	IMPORTANT: "expirations" is already aggregated (prints/size/premium). Use it for the strike summary; "lateSessionTape" governs chronology.
-	Use "flowTotals" and "flowFeatures" (ask/bid ratios) to infer directional bias consistently.
-	The primary objective is to explain how YESTERDAY'S 1:30 PM-4:15 PM ET flow may behave TODAY.
-	Use "lateSessionTape" as the primary chronological source and "sampleRows" only as backup.
-	Do NOT collapse the afternoon into one total. Compare 1:30-3:00, 3:00-3:30, and 3:30-4:15.
-	Give the 3:30-4:15 window the greatest weight as positioning that may carry into the next session.
-	Separate a move that likely completed before 3:00 from the signal still open into the close.
-	Name exact contracts with time and entryOptionPrice. Expected style: "entered near 18 and reached 40 at 10:15 AM" when validation supports it.
-	A call/put at ASK is aggressive buying; a call/put at BID is aggressive selling. Never describe a BID print as a purchase.
-Identify real levels (label pivot/supply/demand/wall/friction), contracts with most potential, and squeeze scenarios
-with clear conditions. Avoid generic phrases; use concise, specific reads.
-Include a final conclusion summarizing bias and the level map in 3-5 bullets.
-Include "observations" (literal facts) and "inferences" (with support, confidence, and alternatives if needed).
-Include "scenarioMatrix" (bullish/bearish/range) with trigger, confirmation, invalidation, and risk.
-If the underlying symbol appears in prints, include it in keyTrades[].details.symbol (e.g., SPX, SPXW, NDX).
-Include large deep ITM prints only as a note (not a key level) if OI is low.
-If prints mix BID/ASK, clarify whether it's premium selling or aggressive buying.
-In "expirations[].strikes" include the most relevant strikes (6-10 per expiration) with prints/size/premium/OI and quick read.
-In "keyLevels" prioritize 4-6 max levels and explain why they dominate the tape.
-IMPORTANT: "keyLevels" is ALREADY computed in the payload. Use those exact levels for the analysis.
-In "tradingPlan" you must explicitly mention the strongest levels from "keyLevels" (use the exact price values).
-Do not invent levels outside "keyLevels". If you need levels, choose from "keyLevels".
-Do NOT invent data or conclusions outside the payload. If data is missing, say it explicitly.
-Do not be agreeable or tell the user what they want to hear; be objective with the data.
-If dataQuality.isStale is true (expired dates or old timestamps), explicitly say the data is old (-1DTE or earlier) and the analysis is historical.
-Use recentOutcomes only as contextual feedback; it must not override current data.
-Use recentValidations to calibrate how long similar flows took to confirm or fail, without assuming the pattern will repeat.
-Include a short disclosure in "riskNotes" stating the analysis is based only on the provided data and may be incomplete if BID/ASK prints or rows are missing.
-IMPORTANT: Only consider aggressive flow when prints are at ASK (directional entries) or BID (premium selling).
-If prints are MID/MIXED/UNKNOWN, do not classify as aggressive.
-Consider trader notes (analystNotes) and recent memory (recentMemory) to improve the analysis.
-Return only valid JSON with this shape:
-{
-  "summary": "short executive summary",
-  "flowBias": "bullish | bearish | mixed | neutral",
-  "lateSessionRead": {
-    "completedMove": "move that likely finished yesterday",
-    "regimeShift": "what changed, approximate time, and evidence",
-    "carryForward": "3:30-4:15 signal that may carry into today",
-    "todayBehavior": "expected sequence today: open, confirmation, timing/condition, and invalidation",
-    "contractsToTrack": ["contract + time + entry price + what must happen today"]
-  },
-  "observations": ["O1 ...", "O2 ..."],
-  "inferences": [
-    { "statement": "I1 ...", "support": ["O1"], "confidence": "High|Medium|Low", "alternatives": ["..."] }
-  ],
-  "scenarioMatrix": {
-    "bullish": { "trigger": "...", "confirmation": "...", "invalidation": "...", "risk": "..." },
-    "bearish": { "trigger": "...", "confirmation": "...", "invalidation": "...", "risk": "..." },
-    "range": { "trigger": "...", "confirmation": "...", "invalidation": "...", "risk": "..." }
-  },
-  "expirations": [
-    {
-      "expiry": "YYYY-MM-DD",
-      "tenor": "0DTE | 1DTE | weekly | monthly | other",
-      "range": "approx spot zone",
-      "strikes": [
-        {
-          "strike": 0,
-          "type": "C|P",
-          "prints": 0,
-          "sizeTotal": 0,
-          "premiumTotal": "~0",
-          "oiMax": 0,
-          "side": "ASK|BID|MIXED",
-          "read": "quick read"
-        }
-      ],
-      "notes": "per-expiration read",
-      "keyTakeaways": ["..."]
-    }
-  ],
-  "keyLevels": [
-    { "price": 0, "label": "pivot|supply|demand|wall|friction", "side": "BID|ASK|MIXED|UNKNOWN", "reason": "why it matters" }
-  ],
-  "contractsWithPotential": {
-    "gamma": ["contract/strike + why"],
-    "directional": ["contract/strike + why"],
-    "stress": ["contract/strike + why"]
-  },
-  "squeezeScenarios": {
-    "upside": {
-      "condition": "squeeze condition",
-      "candidates": ["..."],
-      "brakes": "main brake"
-    },
-    "downside": {
-      "condition": "squeeze condition",
-      "candidates": ["..."],
-      "brakes": "main brake"
-    }
-  },
-  "tradingPlan": {
-    "headline": "short plan headline",
-    "steps": ["action step 1", "step 2", "step 3"],
-    "invalidation": "what invalidates the plan",
-    "risk": "key risks"
-  },
-  "keyTrades": [
-    {
-      "headline": "short title",
-      "whyItMatters": "1-2 sentences",
-      "details": { "symbol": "...", "strike": "...", "expiry": "...", "size": "...", "premium": "...", "side": "...", "time": "..." }
-    }
-  ],
-  "riskNotes": ["..."],
-  "suggestedFocus": ["..."]
-}
-`.trim();
-
-    let recentMemory: any[] = [];
-    try {
-      if (underlying) {
-        const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-        const { data } = await supabaseAdmin
-          .from("option_flow_memory")
-          .select("created_at, summary, key_levels, notes, trade_intent")
-          .eq("user_id", userId)
-          .eq("underlying", underlying)
-          .gte("created_at", since)
-          .order("created_at", { ascending: false })
-          .limit(6);
-        if (Array.isArray(data)) {
-          recentMemory = data.map((row) => ({
-            date: row.created_at,
-            intent: row.trade_intent,
-            notes: row.notes,
-            summary: row.summary,
-            keyLevels: row.key_levels,
-          }));
-        }
-      }
-    } catch {
-      recentMemory = [];
+          error: isEs
+            ? "Selecciona un ticker para crear o actualizar su perfil de flujo."
+            : "Select a ticker to create or update its flow profile.",
+        },
+        { status: 400 }
+      );
     }
 
-    let recentOutcomes: any[] = [];
+    let historicalAnalyses: any[] = [];
+    let horizonEvaluations: any[] = [];
+    let priorEventFingerprints = new Set<string>();
+    let priorUniqueEventCount = 0;
+    let exactDuplicateFile = false;
+    let existingProfileId: string | null = null;
     try {
-      if (underlying) {
-        const since = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString();
-        const { data } = await supabaseAdmin
-          .from("option_flow_outcomes")
-          .select("created_at, outcome_text, post_mortem")
-          .eq("user_id", userId)
-          .eq("underlying", underlying)
-          .gte("created_at", since)
-          .order("created_at", { ascending: false })
-          .limit(4);
-        if (Array.isArray(data)) {
-          recentOutcomes = data.map((row) => ({
-            date: row.created_at,
-            outcome: row.outcome_text,
-            postMortem: row.post_mortem,
-          }));
-        }
+      const { data: existingProfile } = await supabaseAdmin
+        .from("option_flow_profiles")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("symbol", normalizedRequestedUnderlying)
+        .maybeSingle();
+      if (existingProfile?.id) {
+        existingProfileId = String(existingProfile.id);
+        const [analysisHistory, checkpointHistory, eventHistory, matchingSource] = await Promise.all([
+          supabaseAdmin
+            .from("option_flow_analysis_runs")
+            .select("version,analysis_mode,horizon,target_date,source_session_date,agent_output,data_quality,created_at")
+            .eq("user_id", userId)
+            .eq("profile_id", existingProfile.id)
+            .eq("status", "complete")
+            .order("version", { ascending: false })
+            .limit(8),
+          supabaseAdmin
+            .from("option_flow_horizon_checkpoints")
+            .select("checkpoint_date,status,classification,deterministic_result,evaluated_at")
+            .eq("user_id", userId)
+            .eq("profile_id", existingProfile.id)
+            .order("checkpoint_date", { ascending: false })
+            .limit(12),
+          supabaseAdmin
+            .from("option_flow_events")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", userId)
+            .eq("profile_id", existingProfile.id),
+          sourceFile?.sha256
+            ? supabaseAdmin
+                .from("option_flow_sources")
+                .select("id")
+                .eq("user_id", userId)
+                .eq("profile_id", existingProfile.id)
+                .eq("content_sha256", String(sourceFile.sha256))
+                .limit(1)
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
+        ]);
+        if (!analysisHistory.error) historicalAnalyses = analysisHistory.data ?? [];
+        if (!checkpointHistory.error) horizonEvaluations = checkpointHistory.data ?? [];
+        if (!eventHistory.error) priorUniqueEventCount = eventHistory.count ?? 0;
+        if (!matchingSource.error) exactDuplicateFile = Boolean(matchingSource.data);
       }
     } catch {
-      recentOutcomes = [];
-    }
-
-    let recentValidations: any[] = [];
-    try {
-      if (underlying) {
-        const { data } = await supabaseAdmin
-          .from("option_flow_learning_runs")
-          .select("source_session_date,target_session_date,analysis_snapshot,market_validation")
-          .eq("user_id", userId)
-          .eq("underlying", normalizeSymbol(underlying))
-          .eq("status", "completed")
-          .order("evaluated_at", { ascending: false })
-          .limit(8);
-        if (Array.isArray(data)) {
-          recentValidations = data.map((row: any) => ({
-            sourceDate: row.source_session_date,
-            targetDate: row.target_session_date,
-            priorBias: row.analysis_snapshot?.flowBias ?? null,
-            priorLateSessionRead: row.analysis_snapshot?.lateSessionRead ?? null,
-            priorCarryForwardBias:
-              row.analysis_snapshot?.lateSessionTape?.carryForwardBias ?? null,
-            verdict: row.market_validation?.thesis?.verdict ?? null,
-            firstConfirmedAt: row.market_validation?.thesis?.firstConfirmedAt ?? null,
-            minutesFromOpen: row.market_validation?.thesis?.minutesFromOpen ?? null,
-            maxFavorablePct: row.market_validation?.thesis?.maxFavorablePct ?? null,
-            maxAdversePct: row.market_validation?.thesis?.maxAdversePct ?? null,
-            closeDirectionalPct: row.market_validation?.thesis?.closeDirectionalPct ?? null,
-            contractOutcomes: Array.isArray(row.market_validation?.flows)
-              ? row.market_validation.flows
-                  .filter((flow: any) => flow?.contractEvaluation?.status === "available")
-                  .map((flow: any) => ({
-                    contract: flow.contract,
-                    entryTime: flow.time,
-                    side: flow.side,
-                    entryPrice: flow.contractEvaluation.entryPrice,
-                    maxPrice: flow.contractEvaluation.maxPrice,
-                    maxPriceAt: flow.contractEvaluation.maxPriceAt,
-                    maxPriceReturnPct: flow.contractEvaluation.maxPriceReturnPct,
-                    closePrice: flow.contractEvaluation.closePrice,
-                    closePriceReturnPct: flow.contractEvaluation.closePriceReturnPct,
-                  }))
-                  .slice(0, 12)
-              : [],
-          }));
-        }
-      }
-    } catch {
-      recentValidations = [];
+      historicalAnalyses = [];
+      horizonEvaluations = [];
     }
 
     const ocrRows = await extractRowsFromScreenshots(
@@ -1051,46 +876,134 @@ Return only valid JSON with this shape:
         });
       }
     }
-    if (requestedSourceSessionDate) {
-      const availableSessionDates = flowSessionDates(normalizedRows);
-      if (availableSessionDates.length && !availableSessionDates.includes(requestedSourceSessionDate)) {
-        return NextResponse.json(
-          {
-            error: isEs
-              ? `El archivo no contiene flows del ${requestedSourceSessionDate}. Fechas disponibles: ${availableSessionDates.join(", ")}.`
-              : `The file has no flows for ${requestedSourceSessionDate}. Available dates: ${availableSessionDates.join(", ")}.`,
-          },
-          { status: 400 }
-        );
-      }
-      normalizedRows = normalizedRows.filter((row) => {
-        const rowDate = flowRowSessionDate(row);
-        return !rowDate || rowDate === requestedSourceSessionDate;
-      });
-    }
-
-    const sourceRowCount = normalizedRows.length;
+    const allNormalizedRows = normalizedRows;
+    const sourceRowCount = allNormalizedRows.length;
+    const evidenceWindow = summarizeOptionFlowEvidenceWindow({
+      sessionDates: flowSessionDates(allNormalizedRows),
+      fallbackDate: requestedSourceSessionDate,
+    });
+    const availableSessionDates = evidenceWindow.sessionDates;
     const resolvedAnalysisSessionDate =
-      requestedSourceSessionDate || resolveSourceSessionDate(normalizedRows);
+      evidenceWindow.endDate ||
+      resolveSourceSessionDate(allNormalizedRows);
+    if (!resolvedAnalysisSessionDate) {
+      return NextResponse.json(
+        {
+          error: isEs
+            ? "No se pudo determinar la fecha del flow. Selecciona la fecha de sesión."
+            : "The flow session date could not be determined. Select the session date.",
+        },
+        { status: 400 }
+      );
+    }
+    const evidencePeriodStart = evidenceWindow.startDate ?? resolvedAnalysisSessionDate;
+    const evidencePeriodEnd = evidenceWindow.endDate ?? resolvedAnalysisSessionDate;
+    const marketHistoryStart = [
+      addCalendarDays(marketToday, -420),
+      addCalendarDays(evidencePeriodStart, -10),
+    ].sort()[0];
+    let marketBars: OptionFlowDailyMarketBar[] = [];
+    let marketDataError: string | null = null;
+    try {
+      marketBars = await fetchOptionFlowDailyBars({
+        underlying: normalizedRequestedUnderlying,
+        startDate: marketHistoryStart,
+        endDate: marketToday,
+      });
+    } catch (error) {
+      marketDataError = error instanceof Error ? error.message : String(error);
+    }
+    const requestedMarketDates = availableSessionDates.length
+      ? availableSessionDates
+      : [resolvedAnalysisSessionDate];
+    const marketEvidence = buildOptionFlowMarketEvidence({
+      bars: marketBars,
+      requestedSessionDates: requestedMarketDates,
+      startDate: evidencePeriodStart,
+      endDate: evidencePeriodEnd,
+      providerError: marketDataError,
+    });
+    const analysisMarketBar = marketBars.find(
+      (bar) => bar.sessionDate === resolvedAnalysisSessionDate
+    ) ?? null;
+    const previousMarketBar = marketBars
+      .filter((bar) => bar.sessionDate < resolvedAnalysisSessionDate)
+      .sort((left, right) => left.sessionDate.localeCompare(right.sessionDate))
+      .at(-1) ?? null;
+    const resolvedPreviousClose = previousMarketBar?.close ??
+      (Number.isFinite(Number(previousClose)) ? Number(previousClose) : null);
+    const marketSpotReference = analysisMarketBar?.close ?? resolvedPreviousClose;
+    const rowsWithFingerprints = allNormalizedRows.map((row) => {
+      const rowSessionDate = flowRowSessionDate(row) || resolvedAnalysisSessionDate;
+      const fingerprint = optionFlowEventFingerprint(
+        normalizedRequestedUnderlying,
+        rowSessionDate,
+        row
+      );
+      return { row, fingerprint };
+    });
+    if (existingProfileId && rowsWithFingerprints.length) {
+      const incomingFingerprints = Array.from(
+        new Set(rowsWithFingerprints.map((item) => item.fingerprint))
+      );
+      for (let index = 0; index < incomingFingerprints.length; index += 100) {
+        const batch = incomingFingerprints.slice(index, index + 100);
+        const { data: matches, error: matchesError } = await supabaseAdmin
+          .from("option_flow_events")
+          .select("fingerprint")
+          .eq("user_id", userId)
+          .eq("profile_id", existingProfileId)
+          .in("fingerprint", batch);
+        if (matchesError) throw matchesError;
+        for (const match of matches ?? []) {
+          const fingerprint = String(match.fingerprint ?? "");
+          if (fingerprint) priorEventFingerprints.add(fingerprint);
+        }
+      }
+    }
+    const newEvidenceRows = rowsWithFingerprints
+      .filter((item) => !priorEventFingerprints.has(item.fingerprint))
+      .map((item) => item.row);
+    const repeatedEvidenceRows = rowsWithFingerprints
+      .filter((item) => priorEventFingerprints.has(item.fingerprint))
+      .map((item) => item.row);
+
+    normalizedRows = safeAnalysisMode === "today" && availableSessionDates.length
+      ? allNormalizedRows.filter((row) => flowRowSessionDate(row) === resolvedAnalysisSessionDate)
+      : allNormalizedRows;
     const lateSessionRows = filterLateSessionFlowRows(normalizedRows);
-    const lateSessionWindowApplied = lateSessionRows.length > 0;
+    const lateSessionWindowApplied = safeAnalysisMode === "today" && lateSessionRows.length > 0;
     if (lateSessionWindowApplied) normalizedRows = lateSessionRows;
+    if (!normalizedRows.length) {
+      return NextResponse.json(
+        {
+          error: isEs
+            ? "No se pudieron extraer filas de flow verificables para este ticker y fecha."
+            : "No verifiable flow rows could be extracted for this ticker and date.",
+        },
+        { status: 400 }
+      );
+    }
     const lateSessionTape = buildLateSessionTape(
       normalizedRows,
-      normalizeSymbol(underlying) ?? "",
+      normalizedRequestedUnderlying,
       resolvedAnalysisSessionDate
     );
 
     const { expirationsList, flowTotals } = aggregateRows(normalizedRows);
     const deterministicExpirations = aggregateExpirations(expirationsList);
-    const spotEstimate = estimateSpot(normalizedRows, previousClose ?? null);
+    const spotEstimate = estimateSpot(normalizedRows, marketSpotReference);
     const filteredExpirations = filterExpirationsBySpot(deterministicExpirations, spotEstimate, 10);
     const deterministicKeyLevels = deriveKeyLevelsFromExpirations(
       filteredExpirations,
       lang,
       spotEstimate
     );
-    const positioningStress = computeSqueezeCandidates(normalizedRows, 5);
+    const openInterestEvidence = computeUploadedOpenInterestEvidence(
+      normalizedRows,
+      normalizedRequestedUnderlying,
+      resolvedAnalysisSessionDate
+    );
     const dataQuality: DataQuality = {
       totalRows: normalizedRows.length,
       sourceRows: sourceRowCount,
@@ -1099,6 +1012,17 @@ Return only valid JSON with this shape:
       withSide: normalizedRows.filter((row) => row.side !== "UNKNOWN").length,
       withPremium: normalizedRows.filter((row) => Number.isFinite(row.premium)).length,
       withOi: normalizedRows.filter((row) => Number.isFinite(row.oi)).length,
+      evidencePeriodStart,
+      evidencePeriodEnd,
+      evidenceSessionCount: evidenceWindow.sessionCount || 1,
+      rowsWithoutVerifiedDate: allNormalizedRows.filter((row) => !flowRowSessionDate(row)).length,
+      priorUniqueEvents: priorUniqueEventCount,
+      newUniqueRows: newEvidenceRows.length,
+      repeatedRows: repeatedEvidenceRows.length,
+      exactDuplicateFile,
+      marketDataStatus: marketEvidence.status,
+      marketSessionsMatched: marketEvidence.sessions.length,
+      marketSessionsMissing: marketEvidence.missingRequestedDates.length,
     };
   const todayIso = new Date().toISOString().slice(0, 10);
   const expiryDates = normalizedRows
@@ -1119,10 +1043,14 @@ Return only valid JSON with this shape:
   dataQuality.latestTimestamp = latestTimestamp;
   dataQuality.isStale = Boolean(staleByExpiry || staleByTimestamp);
     const flowFeatures = (() => {
-      const askTotal = flowTotals.callPremiumAsk + flowTotals.putPremiumAsk;
-      const bidTotal = flowTotals.callPremiumBid + flowTotals.putPremiumBid;
-      const askRatio = (flowTotals.callPremiumAsk + 1) / (flowTotals.putPremiumAsk + 1);
-      const bidRatio = (flowTotals.callPremiumBid + 1) / (flowTotals.putPremiumBid + 1);
+      const askTotal = sumKnown([flowTotals.callPremiumAsk, flowTotals.putPremiumAsk]);
+      const bidTotal = sumKnown([flowTotals.callPremiumBid, flowTotals.putPremiumBid]);
+      const askRatio = flowTotals.callPremiumAsk != null && flowTotals.putPremiumAsk != null && flowTotals.putPremiumAsk > 0
+        ? flowTotals.callPremiumAsk / flowTotals.putPremiumAsk
+        : null;
+      const bidRatio = flowTotals.callPremiumBid != null && flowTotals.putPremiumBid != null && flowTotals.putPremiumBid > 0
+        ? flowTotals.callPremiumBid / flowTotals.putPremiumBid
+        : null;
       return {
         askTotal,
         bidTotal,
@@ -1131,171 +1059,259 @@ Return only valid JSON with this shape:
       };
     })();
 
+    const targetDate = optionFlowTargetDate({
+      sourceSessionDate: resolvedAnalysisSessionDate,
+      horizon: safeHorizon,
+      customTargetDate:
+        /^\d{4}-\d{2}-\d{2}$/.test(String(customTargetDate ?? ""))
+          ? String(customTargetDate)
+          : null,
+    });
     const userPayload = {
       provider,
-      underlying,
-      previousClose,
-      tradeIntent: safeTradeIntent,
-      sourceSessionDate: requestedSourceSessionDate,
+      underlying: normalizedRequestedUnderlying,
+      previousClose: resolvedPreviousClose,
+      marketEvidence,
+      analysisMode: safeAnalysisMode,
+      horizon: safeHorizon,
+      targetDate,
+      sourceSessionDate: resolvedAnalysisSessionDate,
+      evidenceCoverage: {
+        startDate: evidencePeriodStart,
+        endDate: evidencePeriodEnd,
+        sessionDates: availableSessionDates,
+        rowsWithoutVerifiedDate: dataQuality.rowsWithoutVerifiedDate,
+      },
+      evidenceDelta: {
+        priorUniqueEvents: priorUniqueEventCount,
+        uploadedUniqueRows: allNormalizedRows.length,
+        newUniqueRows: newEvidenceRows.length,
+        repeatedRows: repeatedEvidenceRows.length,
+        exactDuplicateFile,
+      },
+      priorAnalysis: historicalAnalyses[0]
+        ? {
+            version: historicalAnalyses[0].version,
+            sourceSessionDate: historicalAnalyses[0].source_session_date,
+            analysisMode: historicalAnalyses[0].analysis_mode,
+            horizon: historicalAnalyses[0].horizon,
+            summary: historicalAnalyses[0].agent_output?.summary ?? "DATA NOT AVAILABLE",
+            flowBias: historicalAnalyses[0].agent_output?.flowBias ?? "DATA NOT AVAILABLE",
+            thesisUpdate: historicalAnalyses[0].agent_output?.thesisUpdate ?? null,
+          }
+        : null,
       analystNotes: safeAnalystNotes,
-      recentMemory,
-      recentOutcomes,
-      recentValidations,
+      historicalAnalyses,
+      horizonEvaluations,
       dataQuality,
       flowTotals,
       flowFeatures,
-      lateSessionTape,
+      lateSessionTape: safeAnalysisMode === "today" ? lateSessionTape : null,
       keyLevels: deterministicKeyLevels,
       expirations: filteredExpirations,
-      positioningStress,
+      openInterestEvidence,
       sampleRows: safeRows(normalizedRows.map((row) => row.raw ?? row), 120),
+      newEvidenceSample: safeRows(newEvidenceRows.map((row) => row.raw ?? row), 80),
+      repeatedEvidenceSample: safeRows(repeatedEvidenceRows.map((row) => row.raw ?? row), 20),
     };
 
-    const includeScreensForLLM =
-      String(process.env.OPTIONFLOW_INCLUDE_SCREENSHOTS_LLM ?? "").toLowerCase() === "true";
-    const hasScreens =
-      includeScreensForLLM &&
-      safeScreenshots.length > 0;
-    const modelToUse = hasScreens ? VISION_MODEL : DEFAULT_MODEL;
-    const userContent: any = hasScreens
-      ? [
-          { type: "text", text: JSON.stringify(userPayload, null, 2) },
-          ...safeScreenshots.map((url) => ({
-            type: "image_url",
-            image_url: { url },
-          })),
-        ]
-      : JSON.stringify(userPayload, null, 2);
-
-    const completion = await openai.chat.completions.create({
-      model: modelToUse,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
-      response_format: { type: "json_object" },
-      ...openAiChatTuning(modelToUse, 0),
+    const agentRun = await runOptionFlowIntelligenceAgents({
+      userId,
+      language: lang,
+      analysisMode: safeAnalysisMode,
+      horizon: safeHorizon,
+      targetDate,
+      payload: userPayload,
     });
-
+    let parsed = agentRun.output;
+    const priorAnalysis = historicalAnalyses[0] ?? null;
+    const enforcedThesisStatus = enforceOptionFlowThesisStatus({
+      hasPriorAnalysis: Boolean(priorAnalysis),
+      newUniqueRows: newEvidenceRows.length,
+      candidate: parsed.thesisUpdate.classification,
+    });
+    if (!priorAnalysis) {
+      parsed = {
+        ...parsed,
+        thesisUpdate: {
+          ...parsed.thesisUpdate,
+          classification: enforcedThesisStatus,
+          previousRead: "DATA NOT AVAILABLE",
+          whatChanged: [
+            isEs
+              ? "Este es el análisis base; todavía no existe una lectura anterior verificable para comparar."
+              : "This is the baseline analysis; no prior verified read exists for comparison.",
+          ],
+        },
+      };
+    } else if (newEvidenceRows.length === 0) {
+      const priorSummary = String(priorAnalysis.agent_output?.summary ?? "DATA NOT AVAILABLE");
+      parsed = {
+        ...parsed,
+        summary: priorSummary,
+        flowBias: priorAnalysis.agent_output?.flowBias ?? parsed.flowBias,
+        thesisUpdate: {
+          classification: enforcedThesisStatus,
+          previousRead: priorSummary,
+          currentRead: priorSummary,
+          whatChanged: [
+            isEs
+              ? "La carga no contiene eventos únicos nuevos; la evidencia repetida no modifica la tesis."
+              : "The upload contains no new unique events; repeated evidence does not change the thesis.",
+          ],
+          supportingEvidence: [],
+          contradictoryEvidence: [],
+          uncertainty: [
+            isEs
+              ? "Se necesita evidencia nueva y fechada para fortalecer o debilitar la lectura."
+              : "New dated evidence is required to strengthen or weaken the read.",
+          ],
+        },
+      };
+    } else if (parsed.thesisUpdate.classification !== enforcedThesisStatus) {
+      parsed = {
+        ...parsed,
+        thesisUpdate: {
+          ...parsed.thesisUpdate,
+          classification: enforcedThesisStatus,
+        },
+      };
+    }
     await recordAiUsage({
       userId,
       requestId: req.headers.get("x-request-id"),
       feature: "option_flow",
       category: "market_intelligence",
-      operation: hasScreens ? "flow_analysis_with_vision" : "flow_analysis",
-      model: completion.model || modelToUse,
-      usage: completion.usage,
+      operation: "flow_intelligence_agents",
+      model: agentRun.model,
+      usage: agentRun.usage,
+      apiKind: "responses",
+      metadata: {
+        analysisMode: safeAnalysisMode,
+        horizon: safeHorizon,
+        symbol: normalizedRequestedUnderlying,
+      },
     });
 
-    const raw = completion.choices[0]?.message?.content ?? "";
-    let parsed: any = null;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = null;
-    }
-
-    const summary = parsed?.summary ?? raw;
-    const keyTrades = Array.isArray(parsed?.keyTrades) ? parsed.keyTrades : [];
-    const observations = Array.isArray(parsed?.observations) ? parsed.observations : [];
-    const inferences = Array.isArray(parsed?.inferences) ? parsed.inferences : [];
-    const scenarioMatrix =
-      parsed?.scenarioMatrix && typeof parsed.scenarioMatrix === "object"
-        ? parsed.scenarioMatrix
-        : null;
-    const lateSessionRead =
-      parsed?.lateSessionRead && typeof parsed.lateSessionRead === "object"
-        ? parsed.lateSessionRead
-        : null;
+    const summary = parsed.summary;
+    const keyTrades = parsed.keyContracts.map((contract) => ({
+      headline: contract.contract,
+      whyItMatters: contract.reason,
+      details: {
+        symbol: normalizedRequestedUnderlying,
+        contract: contract.contract,
+        expiry: contract.expiry,
+        observedContractPrice: contract.observedPrice,
+        limitations: contract.limitations,
+      },
+    }));
+    const observations = parsed.observations;
+    const inferences = parsed.interpretations;
+    const scenarioMatrix = {
+      bullish: {
+        trigger: parsed.scenarios.bullish.conditions.join(" "),
+        confirmation: parsed.scenarios.bullish.priceZone ?? "DATA NOT AVAILABLE",
+        invalidation: parsed.scenarios.bullish.invalidation,
+        risk: parsed.scenarios.bullish.timing,
+      },
+      bearish: {
+        trigger: parsed.scenarios.bearish.conditions.join(" "),
+        confirmation: parsed.scenarios.bearish.priceZone ?? "DATA NOT AVAILABLE",
+        invalidation: parsed.scenarios.bearish.invalidation,
+        risk: parsed.scenarios.bearish.timing,
+      },
+      range: {
+        trigger: parsed.scenarios.base.conditions.join(" "),
+        confirmation: parsed.scenarios.base.priceZone ?? "DATA NOT AVAILABLE",
+        invalidation: parsed.scenarios.base.invalidation,
+        risk: parsed.scenarios.base.timing,
+      },
+    };
+    const lateSessionRead = safeAnalysisMode === "today"
+      ? {
+          completedMove: parsed.horizonRead.interpretation,
+          regimeShift: parsed.contradiction.strongestAlternativeExplanation,
+          carryForward: parsed.accumulation.classification,
+          todayBehavior: parsed.scenarios.base.timing,
+          contractsToTrack: parsed.keyContracts.map((contract) => contract.contract),
+        }
+      : null;
     const expirations = filteredExpirations;
-    const contractsWithPotential =
-      parsed?.contractsWithPotential && typeof parsed.contractsWithPotential === "object"
-        ? parsed.contractsWithPotential
-        : null;
-    const squeezeScenarios =
-      parsed?.squeezeScenarios && typeof parsed.squeezeScenarios === "object"
-        ? parsed.squeezeScenarios
-        : null;
+    const contractsWithPotential = {
+      gamma: parsed.keyContracts.map((contract) => `${contract.contract}: ${contract.reason}`),
+      directional: [],
+      stress: parsed.accumulation.contradictoryEvidence,
+    };
+    const squeezeScenarios = null;
     const keyLevels = deterministicKeyLevels;
-    const flowBias =
-      parsed?.flowBias ??
-      (lateSessionTape.carryForwardBias === "unknown"
-        ? deriveFlowBiasFromTotals(flowTotals)
-        : lateSessionTape.carryForwardBias);
-    const tradingPlan =
-      parsed?.tradingPlan && typeof parsed.tradingPlan === "object" ? parsed.tradingPlan : null;
-
-    const analysisCreatedAt = new Date().toISOString();
-    let uploadId: string | null = null;
-    try {
-      const { data: insert, error: insErr } = await supabaseAdmin
-        .from("option_flow_memory")
-        .insert({
-          user_id: userId,
-          provider: provider ?? null,
-          underlying: underlying ?? null,
-          trade_intent: tradeIntent ?? null,
-          notes: analystNotes ?? null,
-          summary: summary ?? null,
-          key_levels: keyLevels ?? [],
-          key_trades: keyTrades ?? [],
-          created_at: analysisCreatedAt,
-        })
-        .select("id")
-        .single();
-      if (!insErr && insert?.id) {
-        uploadId = String(insert.id);
-      }
-    } catch (e) {
-      console.warn("[option-flow] memory insert failed:", e);
-    }
-
-    let learningRun: any = null;
-    const rowUnderlyings = Array.from(
-      new Set(
-        normalizedRows
-          .map((row) => normalizeSymbol(row.underlying))
-          .filter((value): value is string => Boolean(value))
-      )
-    );
-    const learningUnderlying = normalizeSymbol(underlying) ||
-      (rowUnderlyings.length === 1 ? rowUnderlyings[0] : null);
-    if (uploadId && learningUnderlying) {
-      try {
-        const trackedFlows = buildLateSessionTrackedFlows(normalizedRows, learningUnderlying);
-        learningRun = await scheduleOptionFlowLearning({
-          userId,
-          memoryId: uploadId,
-          underlying: learningUnderlying,
-          sourceSessionDate: resolvedAnalysisSessionDate,
-          provider: provider ?? null,
-          tradeIntent: tradeIntent ?? null,
-          trackedFlows,
-          analysisSnapshot: {
-            createdAt: analysisCreatedAt,
-            summary,
-            flowBias,
-            previousClose: previousClose ?? null,
-            spotEstimate,
-            keyLevels,
-            keyTrades,
-            flowTotals,
-            lateSessionTape,
-            lateSessionRead,
-            lateSessionWindow: "13:30-16:15 America/New_York",
-            trackedFlowCount: trackedFlows.length,
-          },
-        });
-      } catch (error) {
-        console.warn("[option-flow] learning schedule failed:", error);
-      }
-    }
+    const flowBias = parsed.flowBias === "insufficient_data" && dataQuality.withPremium > 0
+      ? deriveFlowBiasFromTotals(flowTotals)
+      : parsed.flowBias;
+    const tradingPlan = null;
+    const deterministicSnapshot = {
+      version: 1,
+      symbol: normalizedRequestedUnderlying,
+      analysisMode: safeAnalysisMode,
+      horizon: safeHorizon,
+      targetDate,
+      sourceSessionDate: resolvedAnalysisSessionDate,
+      evidenceCoverage: {
+        startDate: evidencePeriodStart,
+        endDate: evidencePeriodEnd,
+        sessionDates: availableSessionDates,
+      },
+      evidenceDelta: {
+        priorUniqueEvents: priorUniqueEventCount,
+        uploadedUniqueRows: allNormalizedRows.length,
+        newUniqueRows: newEvidenceRows.length,
+        repeatedRows: repeatedEvidenceRows.length,
+        exactDuplicateFile,
+      },
+      previousClose: resolvedPreviousClose,
+      marketEvidence,
+      spotEstimate,
+      flowBias,
+      flowTotals,
+      flowFeatures,
+      keyLevels,
+      expirations,
+      openInterestEvidence,
+      lateSessionTape: safeAnalysisMode === "today" ? lateSessionTape : null,
+      formulas: {
+        flowTotals: "sum(premium) grouped by option type and aggressor side",
+        keyLevels: "rank strikes by observed premium, size, print count, and spot proximity",
+        evidenceDelta: "SHA-256 canonical event fingerprints compared with previously stored profile events",
+        openInterestChange: "use only a source-reported OI change or compare distinct verified OI effective sessions; never compare intraday prints",
+      },
+      calculatedAt: new Date().toISOString(),
+    };
+    const persisted = await persistOptionFlowAnalysis({
+      userId,
+      symbol: normalizedRequestedUnderlying,
+      provider: provider ?? null,
+      language: lang,
+      analysisMode: safeAnalysisMode,
+      horizon: safeHorizon,
+      customTargetDate: targetDate,
+      sourceSessionDate: resolvedAnalysisSessionDate,
+      analystNotes: safeAnalystNotes,
+      normalizedRows: allNormalizedRows,
+      marketBars,
+      screenshotDataUrls: safeScreenshots,
+      sourceFile: sourceFile ?? null,
+      deterministicSnapshot,
+      agentOutput: parsed,
+      dataQuality,
+      model: agentRun.model,
+      agentUsage: agentRun.usage,
+      traceId: agentRun.traceId,
+    });
 
     return NextResponse.json({
       summary,
       keyTrades,
       flowBias,
-      lateSessionTape,
+      lateSessionTape: safeAnalysisMode === "today" ? lateSessionTape : null,
       lateSessionRead,
       observations,
       inferences,
@@ -1303,15 +1319,29 @@ Return only valid JSON with this shape:
       keyLevels,
       expirations,
       contractsWithPotential,
-      positioningStress,
+      openInterestEvidence,
       squeezeScenarios,
       tradingPlan,
-      notablePatterns: parsed?.notablePatterns ?? [],
-      riskNotes: parsed?.riskNotes ?? [],
-      suggestedFocus: parsed?.suggestedFocus ?? [],
+      analysisMode: safeAnalysisMode,
+      horizon: safeHorizon,
+      targetDate,
+      evidenceStrength: parsed.evidenceStrength,
+      thesisUpdate: parsed.thesisUpdate,
+      evidenceDelta: deterministicSnapshot.evidenceDelta,
+      horizonRead: parsed.horizonRead,
+      accumulation: parsed.accumulation,
+      contradiction: parsed.contradiction,
+      agentOutput: parsed,
+      deterministicSnapshot,
+      notablePatterns: parsed.interpretations,
+      riskNotes: parsed.riskNotes,
+      suggestedFocus: parsed.suggestedFocus,
       dataQuality,
-      uploadId,
-      learningRun,
+      uploadId: persisted.analysis.id,
+      analysisRunId: persisted.analysis.id,
+      analysisVersion: persisted.analysis.version,
+      profileId: persisted.profile.id,
+      profile: persisted.profile,
     });
   } catch (err: any) {
     console.error("[option-flow/analyze] error:", err);

@@ -1,17 +1,18 @@
 export const WAITLIST_CAMPAIGN = {
   name: "NeuroTrader 60-day launch waitlist",
-  launchDateIso: "2026-11-02T00:00:00-04:00",
+  launchDateIso: "2026-11-22T00:00:00-04:00",
   launchDateLabel: {
-    en: "November 2, 2026",
-    es: "2 de noviembre de 2026",
+    en: "November 22, 2026",
+    es: "22 de noviembre de 2026",
   },
   launchDateTimeLabel: {
-    en: "November 2, 2026 at 12:00 AM AST",
-    es: "2 de noviembre de 2026 a las 12:00 AM AST",
+    en: "November 22, 2026 at 12:00 AM AST",
+    es: "22 de noviembre de 2026 a las 12:00 AM AST",
   },
   discountLimit: 500,
   discountPercent: 30,
   discountPlan: "annual",
+  promotionCode: "NEURO30",
 } as const;
 
 export type WaitlistCampaign = typeof WAITLIST_CAMPAIGN;

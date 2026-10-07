@@ -72,10 +72,10 @@ The project includes a config plugin (`plugins/with-device-debug-bundling.js`) s
 
 For App Store/TestFlight distribution, build with Archive from `ios/NeuroTrader.xcworkspace` (Release), then upload in Xcode Organizer.
 
-The generated Xcode project also includes a Release archive phase that creates
-and UUID-validates `hermes.framework.dSYM`. If the Hermes binary and dSYM ever
-diverge, Archive fails before upload instead of leaving App Store crashes
-without usable Hermes symbols.
+Hermes is consumed as the prebuilt framework supplied by React Native. Do not
+run `dsymutil` manually against that framework: its debug map references build
+objects from React Native's CI and cannot be reconstructed on a developer Mac.
+The app target continues to generate and archive its own dSYM normally.
 
 ## Android / Google Play Store
 
