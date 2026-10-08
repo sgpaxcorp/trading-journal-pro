@@ -21,8 +21,6 @@ import { t } from "../lib/i18n";
 import { useTheme } from "../lib/ThemeContext";
 import type { ThemeColors } from "../theme";
 
-type Mode = "today" | "forward_positioning";
-type Horizon = "today" | "one_week" | "one_month" | "three_months";
 type Profile = {
   id: string;
   symbol: string;
@@ -90,8 +88,6 @@ export function OptionFlowScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [symbol, setSymbol] = useState("");
   const [provider, setProvider] = useState<(typeof PROVIDERS)[number]>("unusualwhales");
-  const [mode, setMode] = useState<Mode>("today");
-  const [horizon, setHorizon] = useState<Horizon>("today");
   const [flowDate, setFlowDate] = useState(todayKey);
   const [notes, setNotes] = useState("");
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
@@ -141,8 +137,6 @@ export function OptionFlowScreen() {
   function openAnalysis(profileSymbol?: string) {
     setSymbol(cleanSymbol(profileSymbol ?? ""));
     setProvider("unusualwhales");
-    setMode("today");
-    setHorizon("today");
     setFlowDate(todayKey());
     setNotes("");
     setScreenshots([]);
@@ -166,7 +160,7 @@ export function OptionFlowScreen() {
       selectionLimit: remaining,
       orderedSelection: true,
       base64: true,
-      quality: 0.85,
+      quality: 0.6,
     });
     if (result.canceled) return;
     const mapped = result.assets
@@ -175,7 +169,14 @@ export function OptionFlowScreen() {
         id: `${asset.assetId ?? asset.uri}-${index}`,
         uri: asset.uri,
         dataUrl: `data:${asset.mimeType || "image/jpeg"};base64,${asset.base64}`,
-      }));
+      }))
+      .filter((asset) => asset.dataUrl.length <= 900_000);
+    if (mapped.length < result.assets.length) {
+      Alert.alert(
+        t(language, "Screenshot too large", "Screenshot demasiado grande"),
+        t(language, "One or more images could not be compressed enough. Crop them and try again.", "Una o más imágenes no se pudieron comprimir lo suficiente. Recórtalas e intenta nuevamente.")
+      );
+    }
     setScreenshots((current) => [...current, ...mapped].slice(0, 4));
   }
 
@@ -199,15 +200,13 @@ export function OptionFlowScreen() {
         {
           provider,
           underlying: target,
-          analysisMode: mode,
-          horizon,
           sourceSessionDate: flowDate,
           analystNotes: notes,
           rows: [],
           screenshotDataUrls: screenshots.map((item) => item.dataUrl),
           language,
         },
-        { timeoutMs: 120_000 }
+        { timeoutMs: 240_000 }
       );
       const nextId = await loadProfiles(body.profileId ?? null);
       if (nextId) await loadWorkspace(nextId);
@@ -394,10 +393,7 @@ export function OptionFlowScreen() {
             <Pressable style={styles.iconButton} onPress={() => !submitting && setModalVisible(false)}><Ionicons name="close" size={22} color={colors.textPrimary} /></Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
-            <View style={styles.segmentRow}>
-              <Pressable onPress={() => { setMode("today"); setHorizon("today"); }} style={[styles.segment, mode === "today" && styles.segmentActive]}><Text style={styles.segmentTitle}>{t(language, "Today", "Hoy")}</Text><Text style={styles.segmentMeta}>{t(language, "Current session", "Sesión actual")}</Text></Pressable>
-              <Pressable onPress={() => { setMode("forward_positioning"); setHorizon("one_month"); }} style={[styles.segment, mode === "forward_positioning" && styles.segmentActive]}><Text style={styles.segmentTitle}>{t(language, "Future", "Futuro")}</Text><Text style={styles.segmentMeta}>{t(language, "Across expirations", "Entre expiraciones")}</Text></Pressable>
-            </View>
+            <View style={styles.analysisScopeCard}><Ionicons name="sparkles-outline" size={18} color={colors.primary} /><View style={styles.analysisScopeCopy}><Text style={styles.analysisScopeTitle}>{t(language, "Full-spectrum analysis", "Análisis integral")}</Text><Text style={styles.analysisScopeText}>{t(language, "Neuro reviews every dated flow, expiration, OI observation, and OHLC session, then suggests the evidence-supported monitoring horizon.", "Neuro revisa todos los flows fechados, expiraciones, observaciones de OI y sesiones OHLC, y luego sugiere el horizonte de seguimiento respaldado por la evidencia.")}</Text></View></View>
             <Text style={styles.fieldLabel}>TICKER</Text>
             <TextInput value={symbol} onChangeText={(value) => setSymbol(cleanSymbol(value))} autoCapitalize="characters" placeholder="PLTR" placeholderTextColor={colors.textMuted} style={styles.input} />
             <Text style={styles.fieldLabel}>{t(language, "FALLBACK DATE", "FECHA DE RESPALDO")}</Text>
@@ -409,7 +405,6 @@ export function OptionFlowScreen() {
             )}</Text>
             <Text style={styles.fieldLabel}>PROVIDER</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRail}>{PROVIDERS.map((item) => <Pressable key={item} onPress={() => setProvider(item)} style={[styles.chip, provider === item && styles.chipActive]}><Text style={styles.chipText}>{item}</Text></Pressable>)}</ScrollView>
-            {mode === "forward_positioning" ? <><Text style={styles.fieldLabel}>{t(language, "EVALUATION HORIZON", "HORIZONTE DE EVALUACIÓN")}</Text><View style={styles.chipRail}>{(["one_week", "one_month", "three_months"] as Horizon[]).map((item) => <Pressable key={item} onPress={() => setHorizon(item)} style={[styles.chip, horizon === item && styles.chipActive]}><Text style={styles.chipText}>{item.replaceAll("_", " ")}</Text></Pressable>)}</View></> : null}
             <Text style={styles.fieldLabel}>{t(language, "SCREENSHOTS", "SCREENSHOTS")}</Text>
             <Pressable style={styles.uploadButton} onPress={() => void selectScreenshots()}><Ionicons name="images-outline" size={22} color={colors.info} /><Text style={styles.uploadTitle}>{t(language, "Choose flow screenshots", "Escoger screenshots de flow")}</Text><Text style={styles.uploadMeta}>{screenshots.length}/4</Text></Pressable>
             {screenshots.length ? <View style={styles.imageGrid}>{screenshots.map((item) => <View key={item.id} style={styles.imageTile}><Image source={{ uri: item.uri }} style={styles.image} /><Pressable onPress={() => setScreenshots((current) => current.filter((shot) => shot.id !== item.id))} style={styles.removeImage}><Ionicons name="close" size={14} color="#fff" /></Pressable></View>)}</View> : null}
@@ -474,9 +469,9 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   emptyTitle: { color: colors.textPrimary, fontSize: 17, fontWeight: "700" },
   modalRoot: { flex: 1 }, modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: 1, borderBottomColor: colors.border, padding: 18 },
   modalTitle: { marginTop: 3, color: colors.textPrimary, fontSize: 21, fontWeight: "800" }, iconButton: { width: 38, height: 38, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
-  modalContent: { gap: 12, padding: 18, paddingBottom: 40 }, segmentRow: { flexDirection: "row", gap: 8 },
-  segment: { flex: 1, minHeight: 70, justifyContent: "center", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, padding: 11 },
-  segmentActive: { borderColor: colors.primary, backgroundColor: colors.successSoft }, segmentTitle: { color: colors.textPrimary, fontSize: 13, fontWeight: "800" }, segmentMeta: { marginTop: 5, color: colors.textMuted, fontSize: 9 },
+  modalContent: { gap: 12, padding: 18, paddingBottom: 40 },
+  analysisScopeCard: { flexDirection: "row", alignItems: "flex-start", gap: 10, borderWidth: 1, borderColor: colors.success, backgroundColor: colors.successSoft, padding: 12 },
+  analysisScopeCopy: { flex: 1 }, analysisScopeTitle: { color: colors.textPrimary, fontSize: 13, fontWeight: "800" }, analysisScopeText: { marginTop: 4, color: colors.textMuted, fontSize: 10, lineHeight: 16 },
   fieldLabel: { marginTop: 5, color: colors.textMuted, fontSize: 9, fontWeight: "800" }, input: { minHeight: 46, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, color: colors.textPrimary, paddingHorizontal: 12, fontSize: 13 },
   fieldHelp: { marginTop: -6, color: colors.textMuted, fontSize: 9, lineHeight: 14 },
   notesInput: { minHeight: 90, paddingTop: 12, textAlignVertical: "top" }, chipRail: { flexDirection: "row", flexWrap: "wrap", gap: 7 },

@@ -399,7 +399,9 @@ export async function persistOptionFlowAnalysis(input: PersistOptionFlowAnalysis
         latestAnalysisRunId: analysis.id,
         latestAnalysisVersion: version,
         latestFlowBias: input.agentOutput.flowBias ?? input.deterministicSnapshot.flowBias ?? null,
-        analysisMode: input.analysisMode,
+        analysisMode: input.deterministicSnapshot.analysisMode === "comprehensive"
+          ? "comprehensive"
+          : input.analysisMode,
         horizon: input.horizon,
         targetDate,
         dataQuality: input.dataQuality,
@@ -435,8 +437,8 @@ export async function persistOptionFlowAnalysis(input: PersistOptionFlowAnalysis
   // Give the frozen analysis the same dated market evidence used by its AI run.
   // The scheduled close job keeps the series current after this initial load.
   try {
-    if (input.marketBars?.length) {
-      await persistDailyBars(input.marketBars);
+    if (Array.isArray(input.marketBars)) {
+      if (input.marketBars.length) await persistDailyBars(input.marketBars);
     } else {
       const endDate = new Intl.DateTimeFormat("en-CA", {
         timeZone: "America/New_York",

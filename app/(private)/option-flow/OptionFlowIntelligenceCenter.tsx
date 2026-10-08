@@ -23,8 +23,6 @@ import {
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 type Lang = "en" | "es";
-type AnalysisMode = "today" | "forward_positioning";
-type Horizon = "today" | "one_week" | "one_month" | "three_months" | "custom";
 type WorkspaceTab = "overview" | "timeline" | "expirations" | "contracts" | "open_interest" | "trend" | "analyses" | "evidence";
 
 type Profile = {
@@ -86,6 +84,20 @@ function cleanSymbol(value: string) {
   return value.toUpperCase().replace(/[^A-Z0-9.^=-]/g, "").slice(0, 10);
 }
 
+function horizonLabel(value: unknown, lang: Lang) {
+  const labels: Record<string, [string, string]> = {
+    today: ["Today", "Hoy"],
+    next_session: ["Next session", "Próxima sesión"],
+    one_week: ["1 week", "1 semana"],
+    one_month: ["1 month", "1 mes"],
+    three_months: ["3 months", "3 meses"],
+    six_months: ["6 months", "6 meses"],
+    leaps: ["LEAPS", "LEAPS"],
+  };
+  const match = labels[String(value ?? "")];
+  return match ? match[lang === "es" ? 1 : 0] : "DATA NOT AVAILABLE";
+}
+
 function money(value: unknown) {
   if (value == null || value === "") return "DATA NOT AVAILABLE";
   const number = Number(value);
@@ -135,13 +147,29 @@ function biasTone(value: unknown) {
   return "border-sky-400/30 bg-sky-400/10 text-sky-200";
 }
 
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read image."));
-    reader.readAsDataURL(file);
-  });
+async function compressedScreenshotDataUrl(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    let scale = Math.min(1, 1_800 / bitmap.width, 1_800 / bitmap.height);
+    let quality = 0.88;
+    let result = "";
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Could not prepare the screenshot.");
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      result = canvas.toDataURL("image/jpeg", quality);
+      if (result.length <= 800_000) return result;
+      quality = Math.max(0.58, quality - 0.08);
+      scale *= 0.84;
+    }
+    if (!result || result.length > 900_000) throw new Error("The screenshot is too large after compression.");
+    return result;
+  } finally {
+    bitmap.close();
+  }
 }
 
 function Metric({ label, value, tone = "text-slate-50" }: { label: string; value: string; tone?: string }) {
@@ -177,9 +205,6 @@ export default function OptionFlowIntelligenceCenter() {
   const [refreshingOi, setRefreshingOi] = useState(false);
   const [symbol, setSymbol] = useState("");
   const [provider, setProvider] = useState<OptionFlowProviderId>("unusualwhales");
-  const [mode, setMode] = useState<AnalysisMode>("today");
-  const [horizon, setHorizon] = useState<Horizon>("today");
-  const [customTargetDate, setCustomTargetDate] = useState("");
   const [sourceSessionDate, setSourceSessionDate] = useState(todayKey);
   const [notes, setNotes] = useState("");
   const [dataFile, setDataFile] = useState<File | null>(null);
@@ -268,11 +293,6 @@ export default function OptionFlowIntelligenceCenter() {
     else setWorkspace(null);
   }, [selectedId, loadWorkspace]);
 
-  useEffect(() => {
-    if (mode === "today") setHorizon("today");
-    else if (horizon === "today") setHorizon("one_month");
-  }, [mode, horizon]);
-
   const filteredProfiles = useMemo(() => {
     const needle = cleanSymbol(query);
     return needle ? profiles.filter((profile) => profile.symbol.includes(needle)) : profiles;
@@ -300,7 +320,7 @@ export default function OptionFlowIntelligenceCenter() {
 
   function resetForm(profileSymbol?: string) {
     setSymbol(cleanSymbol(profileSymbol ?? ""));
-    setProvider("unusualwhales"); setMode("today"); setHorizon("today"); setCustomTargetDate("");
+    setProvider("unusualwhales");
     setSourceSessionDate(todayKey()); setNotes(""); setDataFile(null); setParsedRows([]);
     setDetectedSymbols([]); setScreenshots([]); setParseProgress({ percent: 0, scanned: 0, accepted: 0 }); setNotice("");
   }
@@ -327,7 +347,7 @@ export default function OptionFlowIntelligenceCenter() {
       const incoming = Array.from(files).slice(0, Math.max(0, 4 - screenshots.length));
       const mapped = await Promise.all(incoming.map(async (file) => ({
         id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
-        name: file.name, dataUrl: await fileToDataUrl(file),
+        name: file.name, dataUrl: await compressedScreenshotDataUrl(file),
       })));
       setScreenshots((current) => [...current, ...mapped].slice(0, 4));
     } catch { setNotice(L("One screenshot could not be read.", "No se pudo leer uno de los screenshots.")); }
@@ -347,8 +367,7 @@ export default function OptionFlowIntelligenceCenter() {
       const response = await authenticatedFetch("/api/option-flow/analyze", {
         method: "POST",
         body: JSON.stringify({
-          provider, underlying: target, analysisMode: mode, horizon,
-          customTargetDate: horizon === "custom" ? customTargetDate : null,
+          provider, underlying: target,
           sourceSessionDate, analystNotes: notes, rows,
           screenshotDataUrls: screenshots.map((item) => item.dataUrl), sourceFile, language: lang,
         }),
@@ -495,7 +514,7 @@ export default function OptionFlowIntelligenceCenter() {
                       <span className={`h-2 w-2 rounded-full ${profile.status === "active" ? "bg-emerald-300" : "bg-amber-300"}`} />
                     </div>
                     <p className="mt-1 truncate text-[10px] text-slate-500">
-                      {profile.current_snapshot?.analysisMode === "forward_positioning" ? L("Future positioning", "Posicionamiento futuro") : L("Today", "Hoy")}
+                      {`${L("Full-spectrum", "Análisis integral")} · ${horizonLabel(profile.current_snapshot?.horizon, lang)}`}
                     </p>
                     <p className="mt-2 text-[10px] text-slate-400">{displayDate(profile.last_analysis_at, lang)}</p>
                   </button>
@@ -762,7 +781,7 @@ export default function OptionFlowIntelligenceCenter() {
                 ) : null}
 
                 {tab === "analyses" ? (
-                  <div className="space-y-3">{(workspace.analyses ?? []).map((item) => <div key={item.id} className="grid gap-3 border border-slate-800 bg-slate-950/40 p-4 text-left sm:grid-cols-[80px_170px_1fr_auto]"><span className="text-sm font-semibold text-emerald-300">v{item.version}</span><div><p className="text-[9px] uppercase text-slate-500">{item.analysis_mode === "today" ? L("Today", "Hoy") : L("Future positioning", "Posicionamiento futuro")}</p><p className="mt-1 text-xs text-slate-300">{item.data_quality?.evidencePeriodStart ?? item.source_session_date} · {item.data_quality?.evidencePeriodEnd ?? item.source_session_date}</p><p className="mt-1 text-[9px] text-slate-500">{item.data_quality?.newUniqueRows ?? "—"} {L("new", "nuevos")} · {item.data_quality?.repeatedRows ?? "—"} {L("repeated", "repetidos")}</p></div><div><p className="text-xs leading-5 text-slate-300">{item.agent_output?.summary ?? "DATA NOT AVAILABLE"}</p><p className="mt-2 text-[9px] font-semibold text-sky-300">{String(item.agent_output?.thesisUpdate?.classification ?? "INSUFFICIENT_EVIDENCE").replaceAll("_", " ")}</p></div><ChevronRight className="h-4 w-4 text-slate-600" /></div>)}</div>
+                  <div className="space-y-3">{(workspace.analyses ?? []).map((item) => <div key={item.id} className="grid gap-3 border border-slate-800 bg-slate-950/40 p-4 text-left sm:grid-cols-[80px_170px_1fr_auto]"><span className="text-sm font-semibold text-emerald-300">v{item.version}</span><div><p className="text-[9px] uppercase text-slate-500">{item.agent_output?.horizonRead?.analysisMode === "comprehensive" ? `${L("Full-spectrum", "Análisis integral")} · ${horizonLabel(item.agent_output?.horizonRead?.horizon, lang)}` : L("Legacy analysis", "Análisis anterior")}</p><p className="mt-1 text-xs text-slate-300">{item.data_quality?.evidencePeriodStart ?? item.source_session_date} · {item.data_quality?.evidencePeriodEnd ?? item.source_session_date}</p><p className="mt-1 text-[9px] text-slate-500">{item.data_quality?.newUniqueRows ?? "—"} {L("new", "nuevos")} · {item.data_quality?.repeatedRows ?? "—"} {L("repeated", "repetidos")}</p></div><div><p className="text-xs leading-5 text-slate-300">{item.agent_output?.summary ?? "DATA NOT AVAILABLE"}</p><p className="mt-2 text-[9px] font-semibold text-sky-300">{String(item.agent_output?.thesisUpdate?.classification ?? "INSUFFICIENT_EVIDENCE").replaceAll("_", " ")}</p></div><ChevronRight className="h-4 w-4 text-slate-600" /></div>)}</div>
                 ) : null}
 
                 {tab === "evidence" ? (
@@ -786,9 +805,11 @@ export default function OptionFlowIntelligenceCenter() {
             </div>
             <div className="grid gap-5 p-4 sm:p-6 lg:grid-cols-2">
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setMode("today")} className={`border p-3 text-left ${mode === "today" ? "border-emerald-400 bg-emerald-400/10" : "border-slate-700 bg-slate-950/35"}`}><p className="text-sm font-semibold">{L("Today", "Hoy")}</p><p className="mt-1 text-[10px] text-slate-400">{L("Same-session structure", "Estructura de la sesión")}</p></button>
-                  <button type="button" onClick={() => setMode("forward_positioning")} className={`border p-3 text-left ${mode === "forward_positioning" ? "border-emerald-400 bg-emerald-400/10" : "border-slate-700 bg-slate-950/35"}`}><p className="text-sm font-semibold">{L("Future positioning", "Posicionamiento futuro")}</p><p className="mt-1 text-[10px] text-slate-400">{L("Across expirations", "Entre expiraciones")}</p></button>
+                <div className="border border-emerald-400/30 bg-emerald-400/8 p-3">
+                  <div className="flex items-start gap-3">
+                    <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                    <div><p className="text-xs font-semibold text-emerald-100">{L("Full-spectrum analysis", "Análisis integral")}</p><p className="mt-1 text-[10px] leading-4 text-slate-400">{L("The agent reviews every dated flow, expiration, OI observation, and underlying OHLC session, then suggests the monitoring horizon supported by the evidence.", "El agente revisa todos los flows fechados, expiraciones, observaciones de OI y sesiones OHLC del activo, y luego sugiere el horizonte de seguimiento respaldado por la evidencia.")}</p></div>
+                  </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="block"><span className="text-[9px] font-semibold uppercase text-slate-500">Ticker</span><input value={symbol} onChange={(event) => setSymbol(cleanSymbol(event.target.value))} placeholder="PLTR" className="mt-1 h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm font-semibold uppercase outline-none focus:border-emerald-400" /></label>
@@ -803,8 +824,6 @@ export default function OptionFlowIntelligenceCenter() {
                   )}
                 </div>
                 <label className="block"><span className="text-[9px] font-semibold uppercase text-slate-500">Provider</span><select value={provider} onChange={(event) => setProvider(event.target.value as OptionFlowProviderId)} className="mt-1 h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm outline-none focus:border-emerald-400">{OPTION_FLOW_PROVIDERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
-                <div><span className="text-[9px] font-semibold uppercase text-slate-500">{L("Evaluation horizon", "Horizonte de evaluación")}</span><div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">{([mode === "today" ? "today" : "one_week", "one_month", "three_months", "custom"] as Horizon[]).filter((item, index, all) => all.indexOf(item) === index).map((item) => <button key={item} type="button" disabled={mode === "today" && item !== "today"} onClick={() => setHorizon(item)} className={`min-h-9 border px-2 text-[10px] ${horizon === item ? "border-sky-400 bg-sky-400/10 text-sky-200" : "border-slate-700 text-slate-400 disabled:opacity-35"}`}>{item === "today" ? L("Today", "Hoy") : item === "one_week" ? L("1 week", "1 semana") : item === "one_month" ? L("1 month", "1 mes") : item === "three_months" ? L("3 months", "3 meses") : L("Custom", "Custom")}</button>)}</div></div>
-                {horizon === "custom" ? <label className="block"><span className="text-[9px] font-semibold uppercase text-slate-500">{L("Target date", "Fecha objetivo")}</span><input type="date" value={customTargetDate} min={detectedEvidenceWindow?.endDate ?? sourceSessionDate} onChange={(event) => setCustomTargetDate(event.target.value)} className="mt-1 h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm outline-none focus:border-sky-400" /></label> : null}
                 <label className="block"><span className="text-[9px] font-semibold uppercase text-slate-500">{L("Analyst notes", "Notas del analista")}</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={4} maxLength={3000} className="mt-1 w-full resize-none border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-emerald-400" placeholder={L("Optional context not present in the files", "Contexto opcional que no está en los archivos")} /></label>
               </div>
 
@@ -817,7 +836,7 @@ export default function OptionFlowIntelligenceCenter() {
                 </div>
                 {dataFile ? <div className="border border-slate-700 bg-slate-950/55 p-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-xs font-medium">{dataFile.name}</p><p className="mt-1 text-[10px] text-slate-500">{parseProgress.accepted} {L("rows", "filas")} · {detectedSymbols.join(", ") || L("ticker not detected", "ticker no detectado")}</p></div><button type="button" onClick={() => void handleDataFile(null)} aria-label={L("Remove file", "Remover archivo")}><X className="h-4 w-4 text-slate-500" /></button></div>{parseProgress.percent > 0 && parseProgress.percent < 100 ? <div className="mt-3 h-1 bg-slate-800"><div className="h-full bg-emerald-400" style={{ width: `${parseProgress.percent}%` }} /></div> : null}</div> : null}
                 {screenshots.length ? <div className="grid grid-cols-3 gap-2">{screenshots.map((item) => <div key={item.id} className="relative aspect-video overflow-hidden border border-slate-700 bg-slate-950"><img src={item.dataUrl} alt={item.name} className="h-full w-full object-cover" /><button type="button" onClick={() => setScreenshots((current) => current.filter((shot) => shot.id !== item.id))} aria-label={L("Remove image", "Remover imagen")} className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center bg-slate-950/90 text-slate-200"><X className="h-3 w-3" /></button></div>)}</div> : null}
-                <div className="border border-slate-800 bg-slate-950/45 p-4"><p className="text-[9px] font-semibold uppercase text-slate-500">{L("Analysis controls", "Controles del análisis")}</p><div className="mt-3 space-y-2 text-[11px] text-slate-300"><p className="flex items-center justify-between"><span>Ticker</span><strong>{cleanSymbol(symbol) || "—"}</strong></p><p className="flex items-center justify-between"><span>{L("Mode", "Modo")}</span><strong>{mode === "today" ? L("Today", "Hoy") : L("Future", "Futuro")}</strong></p><p className="flex items-center justify-between"><span>{L("Inputs", "Entradas")}</span><strong>{(dataFile ? 1 : 0) + screenshots.length}</strong></p></div></div>
+                <div className="border border-slate-800 bg-slate-950/45 p-4"><p className="text-[9px] font-semibold uppercase text-slate-500">{L("Analysis controls", "Controles del análisis")}</p><div className="mt-3 space-y-2 text-[11px] text-slate-300"><p className="flex items-center justify-between"><span>Ticker</span><strong>{cleanSymbol(symbol) || "—"}</strong></p><p className="flex items-center justify-between"><span>{L("Scope", "Alcance")}</span><strong>{L("All evidence", "Toda la evidencia")}</strong></p><p className="flex items-center justify-between"><span>{L("Horizon", "Horizonte")}</span><strong>{L("Agent inferred", "Inferido por el agente")}</strong></p><p className="flex items-center justify-between"><span>{L("Inputs", "Entradas")}</span><strong>{(dataFile ? 1 : 0) + screenshots.length}</strong></p></div></div>
               </div>
             </div>
             <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-slate-800 bg-slate-900 px-4 py-4 sm:px-6"><p className="hidden max-w-lg text-[10px] leading-4 text-slate-500 sm:block">{L("Observed data stays separate from AI interpretation. Missing values remain DATA NOT AVAILABLE.", "Los datos observados permanecen separados de la interpretación de IA. Los valores faltantes permanecen como DATA NOT AVAILABLE.")}</p><button type="button" onClick={() => void runAnalysis()} disabled={submitting || (!dataFile && !screenshots.length)} className="mr-20 inline-flex min-h-11 w-full items-center justify-center gap-2 bg-emerald-400 px-5 py-2.5 text-sm font-semibold text-slate-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-45 sm:ml-auto sm:mr-0 sm:w-auto">{submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}{submitting ? L("Running agents…", "Ejecutando agentes…") : L("Run analysis", "Ejecutar análisis")}</button></div>

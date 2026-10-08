@@ -8,9 +8,9 @@ Option Flow Intelligence is a persistent research center organized by company or
 
 ## Standard workflow
 1. Select a ticker or create its company profile.
-2. Choose **Today** for same-session structure or **Future positioning** for activity across expirations.
-3. Add CSV/XLSX evidence, screenshots, and optional analyst context. Dates embedded in the evidence are detected automatically; the fallback date is used only for rows or images without a verifiable date.
-4. Run the specialist agents and review the main interpretation, thesis change, new-versus-repeated evidence, contradiction, data quality, expirations, contracts, and source manifest.
+2. Add CSV/XLSX evidence, screenshots, and optional analyst context. Dates embedded in the evidence are detected automatically; the fallback date is used only for rows or images without a verifiable date.
+3. Run the specialist agents. They review the complete dated evidence set and infer the most useful monitoring horizon from the flows, expirations, OI observations, contract prices, and underlying OHLC history.
+4. Review the main interpretation, inferred horizon, thesis change, new-versus-repeated evidence, contradiction, data quality, expirations, contracts, and source manifest.
 5. Return to the same profile whenever new flow arrives. A new version is saved without overwriting earlier analyses.
 6. At 6:00 PM America/New_York on US market days, the system records the available daily OHLC data and updates trend, material-change, and due-horizon reviews.
 7. At 8:15 AM America/New_York, the system reconciles newly available overnight open interest when a licensed automatic provider is configured.
@@ -24,14 +24,8 @@ Option Flow Intelligence is a persistent research center organized by company or
 - A morning AI review may classify the prior flow thesis as strengthened, weakened, unchanged, or insufficient evidence. It cannot recommend a trade.
 - An OI increase does not reveal who is long or short and cannot prove that a specific print opened a position.
 
-## Analysis modes
-**Today**
-
-Reviews the most recent verified session in the evidence, including concentration, aggressive side, strikes, expirations, and same-session structure. Earlier dates in the upload remain preserved in the profile.
-
-**Future positioning**
-
-Reviews the full verified date range in the evidence, how activity is distributed across expirations, and a one-week, one-month, three-month, or custom horizon. A horizon is an evaluation window, not a price prediction.
+## Full-spectrum analysis
+The user does not select an analysis mode or horizon. Each run reviews every verified session in the supplied evidence, including same-session structure, repeated activity across sessions, strikes, expirations, OI observations, contract prices, and the underlying OHLC history. The agent suggests a monitoring horizon supported by that evidence. The horizon is an evaluation window, not a price prediction.
 
 ## What the profile preserves
 - Versioned analyses for the ticker.
@@ -64,7 +58,7 @@ Reviews the full verified date range in the evidence, how activity is distribute
 
 ## Best practices
 - Keep one profile per underlying and add evidence to that same record over time.
-- Match the analysis mode and horizon to the question you are researching.
+- Add new evidence to the existing ticker profile so the system can distinguish genuinely new activity from repeated uploads.
 - Verify source dates, ticker, expirations, and units before running the agents.
 - Treat contradiction and insufficient-data findings as useful outcomes, not failures.
 - Use the daily review to monitor what changed, not as an automatic trading trigger.

@@ -11,6 +11,7 @@ const FETCH_TIMEOUT_MS = 8_000;
 const MAX_CANDLES = 5_000;
 const MAX_OPTION_CANDLES = 10_000;
 const MAX_DAILY_BARS = 800;
+const YAHOO_CACHE_SECONDS = 900;
 
 export type OptionFlowDailyMarketBar = {
   symbol: string;
@@ -53,6 +54,28 @@ export function optionFlowYahooContractSymbol(value: string) {
   return /^[A-Z]{1,8}\d{6}[CP]\d{8}$/.test(normalized) ? normalized : "";
 }
 
+async function fetchYahooChart(url: string, signal: AbortSignal): Promise<Response> {
+  const candidates = [url, url.replace("https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com")];
+  let lastResponse: Response | null = null;
+  for (const candidate of candidates) {
+    const response = await fetch(candidate, {
+      cache: "force-cache",
+      next: { revalidate: YAHOO_CACHE_SECONDS },
+      headers: {
+        Accept: "application/json,text/plain,*/*",
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+      },
+      signal,
+    });
+    if (response.ok) return response;
+    lastResponse = response;
+    if (response.status !== 429 && response.status < 500) break;
+  }
+  if (!lastResponse) throw new Error("Yahoo market-data request did not return a response.");
+  return lastResponse;
+}
+
 export async function fetchOptionFlowIntradayCandles(input: {
   underlying: string;
   startDate: string;
@@ -80,15 +103,7 @@ export async function fetchOptionFlowIntradayCandles(input: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
-      cache: "no-store",
-      headers: {
-        Accept: "application/json,text/plain,*/*",
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
-      },
-      signal: controller.signal,
-    });
+    const response = await fetchYahooChart(url, controller.signal);
     if (!response.ok) {
       throw new Error(`Underlying market-data request failed with ${response.status}.`);
     }
@@ -149,15 +164,7 @@ export async function fetchOptionFlowContractCandles(input: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
-      cache: "no-store",
-      headers: {
-        Accept: "application/json,text/plain,*/*",
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
-      },
-      signal: controller.signal,
-    });
+    const response = await fetchYahooChart(url, controller.signal);
     if (!response.ok) return [];
     const json = await response.json();
     const result = json?.chart?.result?.[0];
@@ -218,15 +225,7 @@ export async function fetchOptionFlowDailyBars(input: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
-      cache: "no-store",
-      headers: {
-        Accept: "application/json,text/plain,*/*",
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36",
-      },
-      signal: controller.signal,
-    });
+    const response = await fetchYahooChart(url, controller.signal);
     if (!response.ok) {
       throw new Error(`Daily market-data request failed with ${response.status}.`);
     }
@@ -238,7 +237,7 @@ export async function fetchOptionFlowDailyBars(input: {
     const quote = result.indicators?.quote?.[0] ?? {};
     const adjusted = result.indicators?.adjclose?.[0]?.adjclose ?? [];
     const meta = result.meta ?? {};
-    const sourceReference = url;
+    const sourceReference = response.url || url;
     const availableAt = new Date().toISOString();
 
     return timestamps

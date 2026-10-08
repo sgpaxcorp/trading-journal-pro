@@ -25,7 +25,6 @@ import {
   optionFlowTargetDate,
   summarizeOptionFlowEvidenceWindow,
   type OptionFlowAnalysisMode,
-  type OptionFlowHorizon,
 } from "@/lib/optionFlowIntelligence";
 import {
   fetchOptionFlowDailyBars,
@@ -46,7 +45,8 @@ const openai = new OpenAI({
 
 const VISION_MODEL = process.env.OPENAI_OPTIONFLOW_VISION_MODEL || GPT_6_ASTRA_MODEL;
 const MAX_SCREENSHOTS = 4;
-const MAX_SCREENSHOT_DATA_URL_CHARS = 7_000_000;
+const MAX_SCREENSHOT_DATA_URL_CHARS = 900_000;
+const MAX_SCREENSHOT_PAYLOAD_CHARS = 3_600_000;
 const BYPASS_ENTITLEMENT =
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "").toLowerCase() === "true" ||
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "") === "1";
@@ -683,11 +683,19 @@ function safeRows(rows: any[], limit = 200) {
 
 function safeScreenshotDataUrls(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
-  const urls = input
+  const candidates = input
     .map((url) => String(url ?? ""))
     .filter((url) => /^data:image\/(?:png|jpe?g|webp);base64,/i.test(url))
-    .slice(0, MAX_SCREENSHOTS);
-  return urls.filter((url) => url.length <= MAX_SCREENSHOT_DATA_URL_CHARS);
+    .slice(0, MAX_SCREENSHOTS)
+    .filter((url) => url.length <= MAX_SCREENSHOT_DATA_URL_CHARS);
+  const accepted: string[] = [];
+  let totalChars = 0;
+  for (const url of candidates) {
+    if (totalChars + url.length > MAX_SCREENSHOT_PAYLOAD_CHARS) break;
+    accepted.push(url);
+    totalChars += url.length;
+  }
+  return accepted;
 }
 
 export async function POST(req: NextRequest) {
@@ -727,9 +735,6 @@ export async function POST(req: NextRequest) {
       provider,
       underlying,
       previousClose,
-      analysisMode,
-      horizon,
-      customTargetDate,
       sourceSessionDate,
       flowSessionDate,
       rows,
@@ -741,9 +746,6 @@ export async function POST(req: NextRequest) {
       provider?: string;
       underlying?: string;
       previousClose?: number;
-      analysisMode?: string;
-      horizon?: string;
-      customTargetDate?: string | null;
       sourceSessionDate?: string;
       flowSessionDate?: string;
       rows?: any[];
@@ -761,24 +763,7 @@ export async function POST(req: NextRequest) {
     const trimmedRows = safeRows(rows ?? [], 2_000);
     const safeScreenshots = safeScreenshotDataUrls(screenshotDataUrls);
     const safeAnalystNotes = String(analystNotes ?? "").slice(0, 3000);
-    const safeAnalysisMode: OptionFlowAnalysisMode =
-      analysisMode === "forward_positioning" ? "forward_positioning" : "today";
-    const allowedHorizons: OptionFlowHorizon[] = [
-      "today",
-      "next_session",
-      "one_week",
-      "one_month",
-      "three_months",
-      "six_months",
-      "leaps",
-      "custom",
-    ];
-    const requestedHorizon = String(horizon ?? "") as OptionFlowHorizon;
-    const safeHorizon: OptionFlowHorizon = allowedHorizons.includes(requestedHorizon)
-      ? requestedHorizon
-      : safeAnalysisMode === "today"
-        ? "today"
-        : "one_month";
+    const safeAnalysisMode: OptionFlowAnalysisMode = "forward_positioning";
     const marketToday = marketDateKey(new Date());
     const sourceDateFallback = sourceSessionDate ?? flowSessionDate;
     const requestedSourceSessionDate = /^\d{4}-\d{2}-\d{2}$/.test(String(sourceDateFallback ?? "")) &&
@@ -968,12 +953,7 @@ export async function POST(req: NextRequest) {
       .filter((item) => priorEventFingerprints.has(item.fingerprint))
       .map((item) => item.row);
 
-    normalizedRows = safeAnalysisMode === "today" && availableSessionDates.length
-      ? allNormalizedRows.filter((row) => flowRowSessionDate(row) === resolvedAnalysisSessionDate)
-      : allNormalizedRows;
-    const lateSessionRows = filterLateSessionFlowRows(normalizedRows);
-    const lateSessionWindowApplied = safeAnalysisMode === "today" && lateSessionRows.length > 0;
-    if (lateSessionWindowApplied) normalizedRows = lateSessionRows;
+    normalizedRows = allNormalizedRows;
     if (!normalizedRows.length) {
       return NextResponse.json(
         {
@@ -984,8 +964,13 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    const latestSessionRows = normalizedRows.filter(
+      (row) => flowRowSessionDate(row) === resolvedAnalysisSessionDate
+    );
+    const lateSessionRows = filterLateSessionFlowRows(latestSessionRows);
+    const lateSessionWindowApplied = false;
     const lateSessionTape = buildLateSessionTape(
-      normalizedRows,
+      lateSessionRows.length ? lateSessionRows : latestSessionRows,
       normalizedRequestedUnderlying,
       resolvedAnalysisSessionDate
     );
@@ -1059,22 +1044,13 @@ export async function POST(req: NextRequest) {
       };
     })();
 
-    const targetDate = optionFlowTargetDate({
-      sourceSessionDate: resolvedAnalysisSessionDate,
-      horizon: safeHorizon,
-      customTargetDate:
-        /^\d{4}-\d{2}-\d{2}$/.test(String(customTargetDate ?? ""))
-          ? String(customTargetDate)
-          : null,
-    });
     const userPayload = {
       provider,
       underlying: normalizedRequestedUnderlying,
       previousClose: resolvedPreviousClose,
       marketEvidence,
-      analysisMode: safeAnalysisMode,
-      horizon: safeHorizon,
-      targetDate,
+      analysisScope: "comprehensive",
+      horizonSelection: "agent_inferred",
       sourceSessionDate: resolvedAnalysisSessionDate,
       evidenceCoverage: {
         startDate: evidencePeriodStart,
@@ -1106,7 +1082,7 @@ export async function POST(req: NextRequest) {
       dataQuality,
       flowTotals,
       flowFeatures,
-      lateSessionTape: safeAnalysisMode === "today" ? lateSessionTape : null,
+      lateSessionTape,
       keyLevels: deterministicKeyLevels,
       expirations: filteredExpirations,
       openInterestEvidence,
@@ -1118,12 +1094,23 @@ export async function POST(req: NextRequest) {
     const agentRun = await runOptionFlowIntelligenceAgents({
       userId,
       language: lang,
-      analysisMode: safeAnalysisMode,
-      horizon: safeHorizon,
-      targetDate,
       payload: userPayload,
     });
     let parsed = agentRun.output;
+    const safeHorizon = parsed.horizonRead.horizon;
+    const targetDate = optionFlowTargetDate({
+      sourceSessionDate: resolvedAnalysisSessionDate,
+      horizon: safeHorizon,
+    });
+    parsed = {
+      ...parsed,
+      horizonRead: {
+        ...parsed.horizonRead,
+        analysisMode: "comprehensive",
+        horizon: safeHorizon,
+        targetDate,
+      },
+    };
     const priorAnalysis = historicalAnalyses[0] ?? null;
     const enforcedThesisStatus = enforceOptionFlowThesisStatus({
       hasPriorAnalysis: Boolean(priorAnalysis),
@@ -1227,7 +1214,7 @@ export async function POST(req: NextRequest) {
         risk: parsed.scenarios.base.timing,
       },
     };
-    const lateSessionRead = safeAnalysisMode === "today"
+    const lateSessionRead = lateSessionTape.totalPrints > 0
       ? {
           completedMove: parsed.horizonRead.interpretation,
           regimeShift: parsed.contradiction.strongestAlternativeExplanation,
@@ -1251,7 +1238,7 @@ export async function POST(req: NextRequest) {
     const deterministicSnapshot = {
       version: 1,
       symbol: normalizedRequestedUnderlying,
-      analysisMode: safeAnalysisMode,
+      analysisMode: "comprehensive",
       horizon: safeHorizon,
       targetDate,
       sourceSessionDate: resolvedAnalysisSessionDate,
@@ -1276,7 +1263,7 @@ export async function POST(req: NextRequest) {
       keyLevels,
       expirations,
       openInterestEvidence,
-      lateSessionTape: safeAnalysisMode === "today" ? lateSessionTape : null,
+      lateSessionTape,
       formulas: {
         flowTotals: "sum(premium) grouped by option type and aggressor side",
         keyLevels: "rank strikes by observed premium, size, print count, and spot proximity",
@@ -1311,7 +1298,7 @@ export async function POST(req: NextRequest) {
       summary,
       keyTrades,
       flowBias,
-      lateSessionTape: safeAnalysisMode === "today" ? lateSessionTape : null,
+      lateSessionTape,
       lateSessionRead,
       observations,
       inferences,
@@ -1322,7 +1309,7 @@ export async function POST(req: NextRequest) {
       openInterestEvidence,
       squeezeScenarios,
       tradingPlan,
-      analysisMode: safeAnalysisMode,
+      analysisMode: "comprehensive",
       horizon: safeHorizon,
       targetDate,
       evidenceStrength: parsed.evidenceStrength,
@@ -1345,6 +1332,21 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     console.error("[option-flow/analyze] error:", err);
+    const transientProviderFailure = /timed?\s*out|headers timeout|econnreset|connection error/i.test(
+      String(err?.message ?? err ?? "")
+    );
+    if (transientProviderFailure) {
+      const isEs = resolveOptionFlowLang(req.headers.get("accept-language")) === "es";
+      return NextResponse.json(
+        {
+          error: isEs
+            ? "El proveedor de IA no respondió a tiempo. Tu evidencia no se perdió; intenta ejecutar el análisis nuevamente."
+            : "The AI provider did not respond in time. Your evidence was not lost; run the analysis again.",
+          retryable: true,
+        },
+        { status: 504 }
+      );
+    }
     return NextResponse.json(
       { error: err?.message ?? "Unknown error" },
       { status: 500 }

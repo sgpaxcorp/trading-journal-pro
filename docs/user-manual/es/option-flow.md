@@ -8,9 +8,9 @@ Option Flow Intelligence es un centro de research persistente organizado por com
 
 ## Flujo estándar
 1. Selecciona un ticker o crea el perfil de la compañía.
-2. Escoge **Hoy** para la estructura de la misma sesión o **Posicionamiento futuro** para actividad entre expiraciones.
-3. Añade evidencia CSV/XLSX, screenshots y contexto opcional del analista. Las fechas incluidas en la evidencia se detectan automáticamente; la fecha de respaldo solo se usa para filas o imágenes sin una fecha verificable.
-4. Ejecuta los agentes especializados y revisa la interpretación principal, cambio de tesis, evidencia nueva versus repetida, contradicción, calidad de datos, expiraciones, contratos y manifiesto de fuentes.
+2. Añade evidencia CSV/XLSX, screenshots y contexto opcional del analista. Las fechas incluidas en la evidencia se detectan automáticamente; la fecha de respaldo solo se usa para filas o imágenes sin una fecha verificable.
+3. Ejecuta los agentes especializados. Ellos revisan toda la evidencia fechada e infieren el horizonte de seguimiento más útil usando los flows, expiraciones, observaciones de OI, precios de contratos y el historial OHLC del activo.
+4. Revisa la interpretación principal, horizonte inferido, cambio de tesis, evidencia nueva versus repetida, contradicción, calidad de datos, expiraciones, contratos y manifiesto de fuentes.
 5. Regresa al mismo perfil cuando llegue flow nuevo. Cada análisis guarda una versión sin sobrescribir las anteriores.
 6. A las 6:00 PM America/New_York de cada día de mercado de EE. UU., el sistema registra el OHLC diario disponible y actualiza tendencia, cambios materiales y revisiones de horizontes vencidos.
 7. A las 8:15 AM America/New_York, el sistema reconcilia el nuevo Open Interest consolidado durante la noche cuando existe un proveedor automático comercial configurado.
@@ -24,14 +24,8 @@ Option Flow Intelligence es un centro de research persistente organizado por com
 - Una revisión matutina de IA puede clasificar la tesis previa como fortalecida, debilitada, sin cambio o evidencia insuficiente. No puede recomendar un trade.
 - Un aumento de OI no revela quién está long o short y no puede demostrar que un print específico abrió una posición.
 
-## Modos de análisis
-**Hoy**
-
-Revisa la sesión verificable más reciente dentro de la evidencia, incluyendo concentración, lado agresor, strikes, expiraciones y estructura de la misma sesión. Las fechas anteriores de la carga permanecen guardadas en el perfil.
-
-**Posicionamiento futuro**
-
-Revisa el rango completo de fechas verificables, cómo se distribuye la actividad entre expiraciones y un horizonte de una semana, un mes, tres meses o una fecha personalizada. El horizonte es una ventana de evaluación, no una predicción de precio.
+## Análisis integral
+El usuario no selecciona un modo ni un horizonte. Cada ejecución revisa todas las sesiones verificables de la evidencia, incluyendo estructura de la sesión, actividad repetida entre sesiones, strikes, expiraciones, observaciones de OI, precios de contratos y el historial OHLC del activo. El agente sugiere un horizonte de seguimiento respaldado por esa evidencia. El horizonte es una ventana de evaluación, no una predicción de precio.
 
 ## Qué conserva el perfil
 - Análisis versionados para el ticker.
@@ -64,7 +58,7 @@ Revisa el rango completo de fechas verificables, cómo se distribuye la activida
 
 ## Mejores prácticas
 - Mantén un perfil por underlying y añade evidencia al mismo registro con el tiempo.
-- Alinea el modo y el horizonte con la pregunta que estás investigando.
+- Añade evidencia nueva al perfil existente del ticker para que el sistema distinga actividad realmente nueva de cargas repetidas.
 - Verifica fechas, ticker, expiraciones y unidades antes de ejecutar los agentes.
 - Trata los hallazgos contradictorios y la falta de datos como resultados útiles, no como fallas.
 - Usa la revisión diaria para entender qué cambió, no como un gatillo automático de trading.

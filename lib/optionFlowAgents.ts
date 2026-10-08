@@ -1,10 +1,28 @@
 import "server-only";
 
-import { Agent, run } from "@openai/agents";
+import { Agent, run, setDefaultOpenAIClient } from "@openai/agents";
+import OpenAI from "openai";
 import { z } from "zod";
 
-import type { OptionFlowAnalysisMode, OptionFlowHorizon } from "@/lib/optionFlowIntelligence";
 import { GPT_6_ASTRA_MODEL } from "@/lib/openAiModelConfig";
+
+const OPTION_FLOW_AGENT_TIMEOUT_MS = 240_000;
+
+setDefaultOpenAIClient(new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  timeout: OPTION_FLOW_AGENT_TIMEOUT_MS,
+  maxRetries: 0,
+}) as any);
+
+const InferredHorizonSchema = z.enum([
+  "today",
+  "next_session",
+  "one_week",
+  "one_month",
+  "three_months",
+  "six_months",
+  "leaps",
+]);
 
 const EvidenceItemSchema = z.object({
   statement: z.string(),
@@ -35,8 +53,8 @@ export const OptionFlowAgentOutputSchema = z.object({
   flowBias: z.enum(["bullish", "bearish", "mixed", "neutral", "insufficient_data"]),
   evidenceStrength: z.enum(["strong", "moderate", "limited", "insufficient"]),
   horizonRead: z.object({
-    analysisMode: z.enum(["today", "forward_positioning"]),
-    horizon: z.string(),
+    analysisMode: z.literal("comprehensive"),
+    horizon: InferredHorizonSchema,
     targetDate: z.string().nullable(),
     interpretation: z.string(),
   }),
@@ -108,9 +126,6 @@ export type OptionFlowAgentOutput = z.infer<typeof OptionFlowAgentOutputSchema>;
 export type RunOptionFlowAgentsInput = {
   userId: string;
   language: "en" | "es";
-  analysisMode: OptionFlowAnalysisMode;
-  horizon: OptionFlowHorizon;
-  targetDate: string;
   payload: Record<string, unknown>;
 };
 
@@ -155,51 +170,20 @@ function languageInstruction(language: "en" | "es") {
 
 function buildAgents(input: RunOptionFlowAgentsInput) {
   const model = process.env.OPENAI_OPTIONFLOW_AGENT_MODEL || process.env.OPENAI_OPTIONFLOW_MODEL || GPT_6_ASTRA_MODEL;
-  const intraday = new Agent({
-    name: "Intraday Flow Analyst",
-    model,
-    instructions: `${CORE_POLICY}\n${languageInstruction(input.language)}
-Focus only on same-session and next-session structure. Examine expiration proximity, strike concentration,
-aggressor side, time buckets, spot context, and whether a late-session move appears completed or unresolved.
-Do not produce a trading plan. Return a concise evidence memo for the director.`,
-  });
-  const positioning = new Agent({
-    name: "Forward Positioning Analyst",
-    model,
-    instructions: `${CORE_POLICY}\n${languageInstruction(input.language)}
-Focus on positioning that can plausibly remain relevant through the supplied horizon. Compare expirations to
-the target date, repeated activity, OI evidence, observed contract prices, strike concentration, and term
-structure only when supplied. Distinguish persistent positioning from one-session noise. Return a concise
-evidence memo for the director.`,
-  });
-  const contradiction = new Agent({
-    name: "Option Flow Contradiction Analyst",
-    model,
-    instructions: `${CORE_POLICY}\n${languageInstruction(input.language)}
-Independently inspect the raw supplied evidence. Identify the strongest non-directional, hedging, closing,
-spread, stale-data, liquidity, or selection-bias explanation. Do not manufacture a bear or bull argument when
-evidence is weak. Return the strongest contradiction and what evidence would resolve it.`,
-  });
-  const primary = input.analysisMode === "today" ? intraday : positioning;
   const director = new Agent({
-    name: "Option Flow Intelligence Director",
+    name: "Comprehensive Option Flow Intelligence Agent",
     model,
     instructions: `${CORE_POLICY}\n${languageInstruction(input.language)}
-You own the final research brief. Call the horizon specialist and the contradiction specialist before writing
-the final output. Reconcile their memos with the deterministic payload. Do not merely repeat either memo.
+You own the final research brief. Review the complete dated evidence set without discarding older sessions or later
+expirations. Examine same-session structure, cross-session repetition, expiration distribution, strike concentration,
+aggressor side, OI evidence, observed contract prices, and underlying OHLC. Independently test the strongest
+non-directional, hedging, closing, spread, stale-data, liquidity, or selection-bias explanation before concluding.
 The output is market intelligence for a persistent symbol profile, never a premarket plan, journal entry,
 trade instruction, or investment approval. The thesisUpdate must compare only genuinely new evidence with the
-prior frozen read supplied in the payload. Keep the summary compact and place detail in evidence arrays.`,
-    tools: [
-      primary.asTool({
-        toolName: input.analysisMode === "today" ? "analyze_intraday_flow" : "analyze_forward_positioning",
-        toolDescription: "Analyze the supplied deterministic flow evidence for the selected horizon.",
-      }),
-      contradiction.asTool({
-        toolName: "challenge_flow_interpretation",
-        toolDescription: "Independently identify contradictory evidence and alternative explanations.",
-      }),
-    ],
+prior frozen read supplied in the payload. Select horizonRead.horizon from the supported values based on the dated
+evidence and expirations, never from a user preference. Explain why the horizon fits while preserving shorter- and
+longer-term contradictions. Do not manufacture a contradiction when evidence is weak. Keep the summary compact and
+place detail in evidence arrays. Complete this in one research pass so the user receives a timely result.`,
     outputType: OptionFlowAgentOutputSchema,
   });
   return { director, model };
@@ -211,15 +195,13 @@ export async function runOptionFlowIntelligenceAgents(input: RunOptionFlowAgents
     director,
     JSON.stringify(
       {
-        analysisMode: input.analysisMode,
-        horizon: input.horizon,
-        targetDate: input.targetDate,
+        analysisScope: "comprehensive",
         payload: input.payload,
       },
       null,
       2
     ),
-    { maxTurns: 7 }
+    { maxTurns: 2 }
   );
   if (!result.finalOutput) throw new Error("Option Flow agents returned no structured output.");
   const usage = result.runContext.usage;
